@@ -4,10 +4,10 @@ local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.
 
 local Window = Fluent:CreateWindow({
     Title = "Universal Tower Defends",
-    SubTitle = "by Switch Hub",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(580, 460),
-    Acrylic = false, -- The blur may be detectable, setting this to false disables blur entirely
+    SubTitle = "Switch Hub",
+    TabWidth = 170,
+    Size = UDim2.fromOffset(640, 500),
+    Acrylic = true,
     Theme = "Dark",
     MinimizeKey = Enum.KeyCode.LeftControl -- Used when theres no MinimizeKeybind
 })
@@ -27,11 +27,18 @@ ToggleButton.Size = UDim2.fromOffset(52, 52)
 ToggleButton.Position = UDim2.new(0.5, -26, 0, 20)
 ToggleButton.BackgroundTransparency = 1
 ToggleButton.Image = "rbxassetid://17002601075"
+ToggleButton.ImageColor3 = Color3.fromRGB(232, 238, 255)
 ToggleButton.Parent = ToggleGui
 
 local Corner = Instance.new("UICorner")
 Corner.CornerRadius = UDim.new(1, 0)
 Corner.Parent = ToggleButton
+
+local ToggleStroke = Instance.new("UIStroke")
+ToggleStroke.Thickness = 1.25
+ToggleStroke.Color = Color3.fromRGB(88, 114, 255)
+ToggleStroke.Transparency = 0.2
+ToggleStroke.Parent = ToggleButton
 
 local uiVisible = true
 local dragging = false
@@ -114,6 +121,7 @@ end)
 --Fluent provides Lucide Icons https://lucide.dev/icons/ for the tabs, icons are optional
 local Tabs = {
     Main = Window:AddTab({ Title = "Main", Icon = "home" }),
+    Gameplay = Window:AddTab({ Title = "Gameplay", Icon = "play" }),
     Marco = Window:AddTab({ Title = "Macro", Icon = "folder-open" }),
     AutoPlay = Window:AddTab({ Title = "Auto Play", Icon = "bot" }),
     Card = Window:AddTab({ Title = "Card", Icon = "file" }),
@@ -208,6 +216,10 @@ do
 
     warn("[Remote] Skip tower remotes at startup, lazy load later")
 
+
+
+
+
     local RecordingMacro = false
     local PlayingMacro = false
     local MacroSessionId = 0
@@ -279,6 +291,8 @@ do
 
         print("[Macro] Saved macros")
     end
+
+
 
     local AutoSelectPathCardEnabled = false
 
@@ -361,7 +375,7 @@ do
         local VirtualInputManager = game:GetService("VirtualInputManager")
         local center = gui.AbsolutePosition + (gui.AbsoluteSize / 2)
         local x = center.X
-        local y = center.Y + 36 
+        local y = center.Y + 36 -- ชดเชย Topbar
 
         print("[CARD] VIM Click:", gui:GetFullName(), "X:", x, "Y:", y)
 
@@ -1247,8 +1261,6 @@ do
 
 
 
-
-
     local AutoPlayEnabled = false
     local AutoPlaceEnabled = false
     local AutoUpgradeEnabled = false
@@ -1323,7 +1335,7 @@ do
             end
         end
 
-        -- เรียงตามตำแหน่งซ้าย -> ขวา แทน LayoutOrder เพราะ LayoutOrder = 0 หมด
+
         table.sort(frames, function(a, b)
             return a.AbsolutePosition.X < b.AbsolutePosition.X
         end)
@@ -1724,6 +1736,241 @@ do
 
 
 
+    local AutoStartGameplayEnabled = false
+    local AutoSkipWaveEnabled = false
+    local AutoReplayEnabled = false
+    local AutoNextEnabled = false
+    local WaveService
+    local WaveRF
+    local VoteRF
+    local WaveRE
+    local VoteReplayRE
+    local NextMapRE
+    local DataRE
+    local SetSettingRE
+
+    local function EnsureWaveVoteRemote()
+        if VoteRF then
+            return true
+        end
+
+        if not Services then
+            Services = Knit:FindFirstChild("Services")
+        end
+
+        if not Services then
+            return false
+        end
+
+        WaveService = WaveService or Services:FindFirstChild("WaveService")
+        WaveRF = WaveService and WaveService:FindFirstChild("RF")
+        VoteRF = WaveRF and WaveRF:FindFirstChild("Vote")
+
+        return VoteRF ~= nil
+    end
+
+    local function EnsureGameplayRemotes()
+        if not Services then
+            Services = Knit:FindFirstChild("Services")
+        end
+
+        if not Services then
+            return false
+        end
+
+        WaveService = WaveService or Services:FindFirstChild("WaveService")
+        WaveRF = WaveService and WaveService:FindFirstChild("RF")
+        WaveRE = WaveService and WaveService:FindFirstChild("RE")
+
+        VoteRF = WaveRF and WaveRF:FindFirstChild("Vote")
+        VoteReplayRE = WaveRE and WaveRE:FindFirstChild("VoteReplay")
+        NextMapRE = WaveRE and WaveRE:FindFirstChild("NextMap")
+
+        DataService = DataService or Services:FindFirstChild("DataService")
+        DataRE = DataService and DataService:FindFirstChild("RE")
+        SetSettingRE = DataRE and DataRE:FindFirstChild("SetSetting")
+
+        return true
+    end
+
+    local function IsVoteStartVisible()
+        local ok, result = pcall(function()
+            local gameUI = LocalPlayer.PlayerGui:FindFirstChild("GameUI")
+            if not gameUI then return false end
+
+            for _, obj in ipairs(gameUI:GetDescendants()) do
+                if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                    local text = tostring(obj.Text or "")
+
+                    if text:find("Vote Start")
+                    or text:find("Start 0/1")
+                    or text:find("Time Left") then
+                        return true
+                    end
+                end
+            end
+
+            return false
+        end)
+
+        return ok and result == true
+    end
+
+    local function VoteStart()
+        if not EnsureWaveVoteRemote() then
+            warn("[Gameplay] Vote remote not ready")
+            return false
+        end
+
+        local ok, r1, r2 = pcall(function()
+            return VoteRF:InvokeServer(true)
+        end)
+
+        print("[Gameplay] Vote Start:", ok, tostring(r1), tostring(r2))
+        return ok
+    end
+
+    local function SetAutoSkipWave(state)
+        EnsureGameplayRemotes()
+
+        if not SetSettingRE then
+            warn("[Gameplay] SetSetting remote not ready")
+            return
+        end
+
+        SetSettingRE:FireServer("AutoSkip", state)
+        print("[Gameplay] AutoSkip:", state)
+    end
+
+    local function GetWaveCurrentMax()
+        local ok, current, max = pcall(function()
+            local label = LocalPlayer.PlayerGui.GameUI.HUD.Upper.WaveInformations.Container.Wave
+            local text = tostring(label.Text or ""):gsub("<.->", "")
+            local c, m = text:match("Wave%s*(%d+)%s*/%s*(%d+)")
+            return tonumber(c), tonumber(m)
+        end)
+
+        if ok then
+            return current, max
+        end
+
+        return nil, nil
+    end
+
+    local function HasEnemyAlive()
+        local units = workspace:FindFirstChild("Ignore")
+            and workspace.Ignore:FindFirstChild("Units")
+
+        if not units then
+            return false
+        end
+
+        for _, obj in ipairs(units:GetChildren()) do
+            if obj:IsA("Model") then
+                return true
+            end
+        end
+
+        return false
+    end
+
+    local function IsResultVisible()
+        local gameUI = LocalPlayer.PlayerGui:FindFirstChild("GameUI")
+        if not gameUI then return nil end
+
+        for _, obj in ipairs(gameUI:GetDescendants()) do
+            if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                local text = tostring(obj.Text or ""):upper()
+
+                if text:find("VICTORY") then
+                    return "Victory"
+                elseif text:find("DEFEAT") then
+                    return "Defeat"
+                end
+            end
+        end
+
+        return nil
+    end
+
+    local function ClickBottomCenter()
+        local VirtualInputManager = game:GetService("VirtualInputManager")
+        local camera = workspace.CurrentCamera
+        if not camera then return end
+
+        local x = camera.ViewportSize.X / 2
+        local y = camera.ViewportSize.Y - 45
+
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+        task.wait(0.05)
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+    end
+
+    local function VoteReplay()
+        EnsureGameplayRemotes()
+
+        if VoteReplayRE then
+            VoteReplayRE:FireServer()
+            print("[Gameplay] Vote Replay fired")
+        end
+    end
+
+    local function VoteNextMap()
+        EnsureGameplayRemotes()
+
+        if NextMapRE then
+            NextMapRE:FireServer()
+            print("[Gameplay] Next Map fired")
+        end
+    end
+
+    task.spawn(function()
+        while task.wait(1) do
+            if Fluent.Unloaded then break end
+
+            if IsInMatch() and AutoStartGameplayEnabled then
+                if IsVoteStartVisible() then
+                    VoteStart()
+                    task.wait(3)
+                end
+            end
+        end
+    end)
+
+    task.spawn(function()
+        while task.wait(1) do
+            if Fluent.Unloaded then break end
+            if not IsInMatch() then continue end
+
+            if AutoSkipWaveEnabled then
+                SetAutoSkipWave(true)
+            end
+
+            local current, max = GetWaveCurrentMax()
+            local finalWave = current and max and current == max
+            local noEnemy = not HasEnemyAlive()
+
+            if finalWave and noEnemy and (AutoReplayEnabled or AutoNextEnabled) then
+                local result = IsResultVisible()
+
+                if not result then
+                    ClickBottomCenter()
+                    task.wait(0.5)
+                    result = IsResultVisible()
+                end
+
+                if AutoReplayEnabled and (result == "Victory" or result == "Defeat") then
+                    VoteReplay()
+                    task.wait(3)
+                elseif AutoNextEnabled and result == "Victory" then
+                    VoteNextMap()
+                    task.wait(3)
+                end
+            end
+        end
+    end)
+
+
 
 
     Tabs.Marco:AddSection("Macro Creation")
@@ -2042,6 +2289,65 @@ do
     }):OnChanged(function(v)
         PathConfig.MinDistance = v
     end)
+
+    Tabs.Gameplay:AddSection("Gameplay")
+
+    Tabs.Gameplay:AddToggle("AutoStartGameplayToggle", {
+        Title = "Auto Start",
+        Description = "กด Vote Start อัตโนมัติเมื่อเจอหน้าต่างเริ่มเกม",
+        Default = false
+    }):OnChanged(function()
+        AutoStartGameplayEnabled = Options.AutoStartGameplayToggle.Value
+    end)
+
+    Tabs.Gameplay:AddToggle("AutoSkipWaveToggle", {
+        Title = "Auto Skip Wave",
+        Description = "เปิด AutoSkip อัตโนมัติ",
+        Default = false
+    }):OnChanged(function()
+        AutoSkipWaveEnabled = Options.AutoSkipWaveToggle.Value
+        SetAutoSkipWave(AutoSkipWaveEnabled)
+    end)
+
+    Tabs.Gameplay:AddToggle("AutoReplayToggle", {
+        Title = "Auto Replay",
+        Description = "จบด่านแล้ว Replay อัตโนมัติ",
+        Default = false
+    }):OnChanged(function()
+        AutoReplayEnabled = Options.AutoReplayToggle.Value
+    end)
+
+    Tabs.Gameplay:AddToggle("AutoNextToggle", {
+        Title = "Auto Next",
+        Description = "จบด่านแล้วไปด่านถัดไป",
+        Default = false
+    }):OnChanged(function()
+        AutoNextEnabled = Options.AutoNextToggle.Value
+    end)
+
+    Tabs.Gameplay:AddButton({
+        Title = "Vote Start Once",
+        Description = "กด Vote Start 1 ครั้ง",
+        Callback = function()
+            VoteStart()
+        end
+    })
+
+    Tabs.Gameplay:AddButton({
+        Title = "Replay Once",
+        Description = "Vote Replay 1 ครั้ง",
+        Callback = function()
+            VoteReplay()
+        end
+    })
+
+    Tabs.Gameplay:AddButton({
+        Title = "Next Once",
+        Description = "Vote NextMap 1 ครั้ง",
+        Callback = function()
+            VoteNextMap()
+        end
+    })
 
     Tabs.Card:AddToggle("AutoSelectPathCardToggle", {
         Title = "Auto Select Card",
@@ -2371,11 +2677,12 @@ do
         end
     end)
 
-    local SelectedRift = "GojoRift"
-    local AutoStartRiftEnabled = false
+    SelectedRift = "GojoRift"
+    AutoStartRiftEnabled = false
 
-    local RiftPacketMap = {
-        ["GojoRift"] = ")\b\000GojoRift\000\000\000\128?\001\0001\000\004\000Easy\000\000\005\000Rifts\000\000"
+    RiftPacketMap = {
+        ["GojoRift"] = ")\b\000GojoRift\000\000\000\128?\001\0001\000\004\000Easy\000\000\005\000Rifts\000\000",
+        ["MegunaRift"] = ")\n\000MegunaRift\000\000\000\128?\001\0001\000\004\000Easy\000\000\005\000Rifts\000\000"
     }
 
     local function GetRiftWorldName()
@@ -2412,12 +2719,12 @@ do
 
     Tabs.Rifts:AddSection("Rifts Information")
 
-    local RiftWorldParagraph = Tabs.Rifts:AddParagraph({
+    RiftWorldParagraph = Tabs.Rifts:AddParagraph({
         Title = "World Name",
         Content = GetRiftWorldName()
     })
 
-    local RiftStatusParagraph = Tabs.Rifts:AddParagraph({
+    RiftStatusParagraph = Tabs.Rifts:AddParagraph({
         Title = "Rotation Status",
         Content = GetRiftStatus()
     })
@@ -2437,7 +2744,8 @@ do
         Title = "Select Rift",
         Description = "เลือก Rift ที่ต้องการสร้างห้อง",
         Values = {
-            "GojoRift"
+            "GojoRift",
+            "MegunaRift"
         },
         Multi = false,
         Default = 1
@@ -2481,12 +2789,12 @@ do
         end
     end)
 
-    local SelectedBossEventMap = "Shinobi Alliance"
-    local AutoJoinBossEventEnabled = false
-    local AutoStartBossEventEnabled = false
-    local AutoFindMatchBossEventEnabled = false
+    SelectedBossEventMap = "Shinobi Alliance"
+    AutoJoinBossEventEnabled = false
+    AutoStartBossEventEnabled = false
+    AutoFindMatchBossEventEnabled = false
 
-    local BossEventPacketMap = {
+    BossEventPacketMap = {
         ["Shinobi Alliance"] = ")\015\000ShinobiAlliance\000\000\000\128?\001\0001\000\t\000Nightmare\015\000ShinobiAlliance\016\000LimitedTimeModes\000\000",
         ["Ragnarok"] = ")\b\000Ragnarok\000\000\000\128?\001\0001\000\t\000Nightmare\b\000Ragnarok\016\000LimitedTimeModes\000\000"
     }
@@ -2600,7 +2908,7 @@ do
     RefreshMacroDropdown()
     RefreshSwitchDropdowns()
 
-    local MapDisplayNames = {
+    MapDisplayNames = {
         "Final Valley",
         "Marine Base",
         "Hueco Mundo",
@@ -2610,7 +2918,7 @@ do
         "Shibuya"
     }
 
-    local MapRemoteNames = {
+    MapRemoteNames = {
         ["Final Valley"] = "Final Valley",
         ["Marine Base"] = "Marine Base",
         ["Hueco Mundo"] = "Hueco Mundo",
@@ -2620,24 +2928,24 @@ do
         ["Shibuya"] = "Shibuya",
     }
 
-    local Acts_Story = {"1", "2", "3", "4", "5", "6"}
-    local Acts_Legend = {"1", "2", "3"}
+    Acts_Story = {"1", "2", "3", "4", "5", "6"}
+    Acts_Legend = {"1", "2", "3"}
 
-    local Difficulties = {
+    Difficulties = {
         "Easy", "Hard", "Nightmare"
     }
 
-    local DifficultyMeters = {
+    DifficultyMeters = {
         "75", "100", "150", "200", "250", "300", "350", "400", "450", "500",
         "550", "600", "650", "700", "750", "800", "850", "900", "950", "1000"
     }
 
-    local AutoJoinEnabled = false
-    local SelectedMap = "Final Valley"
-    local SelectedAct = "1"
-    local SelectedDifficulty = "Easy"
-    local SelectedMeter = "75"
-    local SelectedMode = "Story"
+    AutoJoinEnabled = false
+    SelectedMap = "Final Valley"
+    SelectedAct = "1"
+    SelectedDifficulty = "Easy"
+    SelectedMeter = "75"
+    SelectedMode = "Story"
 
     local function FloatBytes(value)
         local b = buffer.create(4)
@@ -2679,22 +2987,22 @@ do
         StartWorldRaid()
     end
 
-    local ChallengeMaps = {
+    ChallengeMaps = {
         "Ragnarok",
         "Frozen Stronghold"
     }
 
-    local ChallengeRemoteMap = {
+    ChallengeRemoteMap = {
         ["Ragnarok"] = "Olympus Judgement",
         ["Frozen Stronghold"] = "Frozen Stronghold"
     }
 
-    local ChallengeIdMap = {
+    ChallengeIdMap = {
         ["Ragnarok"] = "\001",
         ["Frozen Stronghold"] = "\002"
     }
 
-    local SelectedChallengeMap = "Ragnarok"
+    SelectedChallengeMap = "Ragnarok"
 
     local function JoinChallenge(displayName)
         local realMap = ChallengeRemoteMap[displayName]
@@ -2718,18 +3026,18 @@ do
         StartMission()
     end
 
-    local RaidMaps = {
+    RaidMaps = {
         "Top of Hueco Castle",
         "Shinobi Battlefield",
         "Crimson Throne Chamber"
     }
 
-    local RaidActs = {
+    RaidActs = {
         "1", "2", "3", "4", "5", "Boss Rush"
     }
 
-    local SelectedRaidMap = "Top of Hueco Castle"
-    local SelectedRaidAct = "1"
+    SelectedRaidMap = "Top of Hueco Castle"
+    SelectedRaidAct = "1"
 
     local function JoinRaid(mapName, act)
         local actPart
@@ -2759,7 +3067,7 @@ do
 
     Tabs.Main:AddSection("[🗼] - Story & Extra Mode")
 
-    local ModeDropdown = Tabs.Main:AddDropdown("MissionMode", {
+    ModeDropdown = Tabs.Main:AddDropdown("MissionMode", {
         Title = "Select Mode",
         Description = "เลือกโหมดที่จะเข้า เช่น Story , LegendStage , VirtualRealm",
         Values = {"Story", "LegendStage" , "VirtualRealm"},
@@ -2767,7 +3075,7 @@ do
         Default = 1,
     })
 
-    local ActDropdown = Tabs.Main:AddDropdown("MissionAct", {
+    ActDropdown = Tabs.Main:AddDropdown("MissionAct", {
         Title = "Select Act",
         Description = "เลือกด่าน Act ที่ต้องการเข้า โดยจำนวน Act จะเปลี่ยนตามโหมด",
         Values = Acts_Story,
@@ -2791,7 +3099,7 @@ do
         SelectedAct = Value
     end)
 
-    local MapDropdown = Tabs.Main:AddDropdown("MissionMap", {
+    MapDropdown = Tabs.Main:AddDropdown("MissionMap", {
         Title = "Select Map",
         Description = "เลือกแมพสำหรับ Story หรือโหมดเสริมที่ต้องการเข้า",
         Values = MapDisplayNames,
@@ -2823,7 +3131,7 @@ do
         SelectedMeter = Value
     end)
 
-    local Toggle = Tabs.Main:AddToggle("AutoJoinMission", {
+    Toggle = Tabs.Main:AddToggle("AutoJoinMission", {
         Title = "Auto Join Mission",
         Description = "เปิดเพื่อเข้า Mission และกดเริ่มอัตโนมัติ",
         Default = false
@@ -2856,13 +3164,13 @@ do
         SelectedChallengeMap = Value
     end)
 
-    local ChallengeToggle = Tabs.Main:AddToggle("AutoJoinChallenge", {
+    ChallengeToggle = Tabs.Main:AddToggle("AutoJoinChallenge", {
         Title = "Auto Join Challenge",
         Description = "เปิดเพื่อเข้า Challenge และกดเริ่มอัตโนมัติ",
         Default = false
     })
 
-    local AutoJoinChallengeEnabled = false
+    AutoJoinChallengeEnabled = false
 
     ChallengeToggle:OnChanged(function()
         AutoJoinChallengeEnabled = Options.AutoJoinChallenge.Value
@@ -2900,9 +3208,9 @@ do
         SelectedRaidAct = Value
     end)
 
-    local AutoJoinRaidEnabled = false
+    AutoJoinRaidEnabled = false
 
-    local RaidToggle = Tabs.Main:AddToggle("AutoJoinRaid", {
+    RaidToggle = Tabs.Main:AddToggle("AutoJoinRaid", {
         Title = "Auto Join Raid",
         Description = "เปิดเพื่อเข้า Raid และกดเริ่มอัตโนมัติ",
         Default = false
@@ -2924,9 +3232,9 @@ do
 
     Tabs.Main:AddSection("[☠️] - World Raids")
 
-    local AutoWorldRaidEnabled = false
+    AutoWorldRaidEnabled = false
 
-    local WorldRaidToggle = Tabs.Main:AddToggle("AutoJoinWorldRaid", {
+    WorldRaidToggle = Tabs.Main:AddToggle("AutoJoinWorldRaid", {
         Title = "Auto Join World Raid",
         Description = "เปิดเพื่อเข้า World Raid และหาห้องให้อัตโนมัติ",
         Default = false
