@@ -1,0 +1,2999 @@
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+local Window = Fluent:CreateWindow({
+    Title = "Universal Tower Defends",
+    SubTitle = "by Switch Hub",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = false, -- The blur may be detectable, setting this to false disables blur entirely
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl -- Used when theres no MinimizeKeybind
+})
+
+--// Toggle UI Button
+local CoreGui = game:GetService("CoreGui")
+local UIS = game:GetService("UserInputService")
+
+local ToggleGui = Instance.new("ScreenGui")
+ToggleGui.Name = "SwitchHub_ToggleButton"
+ToggleGui.ResetOnSpawn = false
+ToggleGui.Parent = CoreGui
+
+local ToggleButton = Instance.new("ImageButton")
+ToggleButton.Name = "Toggle"
+ToggleButton.Size = UDim2.fromOffset(52, 52)
+ToggleButton.Position = UDim2.new(0.5, -26, 0, 20)
+ToggleButton.BackgroundTransparency = 1
+ToggleButton.Image = "rbxassetid://17002601075"
+ToggleButton.Parent = ToggleGui
+
+local Corner = Instance.new("UICorner")
+Corner.CornerRadius = UDim.new(1, 0)
+Corner.Parent = ToggleButton
+
+local uiVisible = true
+local dragging = false
+local dragStart
+local startPos
+local moved = false
+
+local function FindFluentGui()
+    for _, gui in ipairs(CoreGui:GetChildren()) do
+        if gui:IsA("ScreenGui") and gui ~= ToggleGui then
+            for _, obj in ipairs(gui:GetDescendants()) do
+                if obj:IsA("TextLabel") and tostring(obj.Text):find("Universal Tower Defends") then
+                    return gui
+                end
+            end
+        end
+    end
+end
+
+local function SetMainUIVisible(state)
+    uiVisible = state
+
+    local ok = pcall(function()
+        if Window and Window.Root then
+            Window.Root.Visible = state
+        end
+    end)
+
+    if ok then return end
+
+    local gui = FindFluentGui()
+    if gui then
+        gui.Enabled = state
+    end
+end
+
+ToggleButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        moved = false
+        dragStart = input.Position
+        startPos = ToggleButton.Position
+    end
+end)
+
+UIS.InputChanged:Connect(function(input)
+    if dragging and (
+        input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch
+    ) then
+        local delta = input.Position - dragStart
+
+        if math.abs(delta.X) > 5 or math.abs(delta.Y) > 5 then
+            moved = true
+        end
+
+        ToggleButton.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if dragging and (
+        input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch
+    ) then
+        dragging = false
+
+        if not moved then
+            SetMainUIVisible(not uiVisible)
+        end
+    end
+end)
+
+--Fluent provides Lucide Icons https://lucide.dev/icons/ for the tabs, icons are optional
+local Tabs = {
+    Main = Window:AddTab({ Title = "Main", Icon = "home" }),
+    Marco = Window:AddTab({ Title = "Macro", Icon = "folder-open" }),
+    AutoPlay = Window:AddTab({ Title = "Auto Play", Icon = "bot" }),
+    Card = Window:AddTab({ Title = "Card", Icon = "file" }),
+    SwitchMacro = Window:AddTab({ Title = "SwitchMacro", Icon = "refresh-cw" }),
+    Portal = Window:AddTab({ Title = "Portal", Icon = "globe" }),
+    Rifts = Window:AddTab({ Title = "Rifts", Icon = "clock-3" }),
+    BossEvent = Window:AddTab({ Title = "Boss Event", Icon = "sword" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+}
+
+local Options = Fluent.Options
+
+do
+    local print = function(...) end
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local Remote = ReplicatedStorage:WaitForChild("ByteNetReliable")
+    local Players = game:GetService("Players")
+    local UserInputService = game:GetService("UserInputService")
+    local LocalPlayer = Players.LocalPlayer
+    local LOBBY_PLACE_ID = 133410800847665
+
+    local function IsLobby()
+        return game.PlaceId == LOBBY_PLACE_ID
+    end
+
+    local function IsInMatch()
+        return game.PlaceId ~= LOBBY_PLACE_ID
+    end
+
+    local Knit = ReplicatedStorage
+        :WaitForChild("Packages")
+        :WaitForChild("_Index")
+        :WaitForChild("sleitnick_knit@1.7.0")
+        :WaitForChild("knit")
+
+    local Services = Knit:FindFirstChild("Services")
+
+    local ItemService
+    local ItemRF
+    local UseItemRF
+
+    local PortalService
+    local PortalRF
+    local StartPortalRF
+
+    local function WaitForService(name, timeout)
+        local service = Services:WaitForChild(name, timeout or 10)
+        if not service then
+            warn("[Service] Missing:", name)
+            return nil
+        end
+        return service
+    end
+
+    local function EnsurePortalRemotes()
+        if UseItemRF and StartPortalRF then
+            return true
+        end
+
+        if not Services then
+            Services = Knit:FindFirstChild("Services")
+        end
+
+        if not Services then
+            return false
+        end
+
+        ItemService = ItemService or Services:FindFirstChild("ItemService")
+        PortalService = PortalService or Services:FindFirstChild("PortalService")
+
+        ItemRF = ItemService and ItemService:FindFirstChild("RF")
+        PortalRF = PortalService and PortalService:FindFirstChild("RF")
+
+        UseItemRF = ItemRF and ItemRF:FindFirstChild("UseItem")
+        StartPortalRF = PortalRF and PortalRF:FindFirstChild("StartPortal")
+
+        return UseItemRF ~= nil or StartPortalRF ~= nil
+    end
+
+    local TowerService
+    local DataService
+    local TowerRF
+    local TowerRE
+    local DataRF
+
+    local PlaceUnitRF
+    local UpgradeUnitRF
+    local SellUnitRF
+    local UseAbilityRE
+    local ToggleAutoUpgradeRF
+    local IncrementAutoUpgradePriorityRF
+
+    warn("[Remote] Skip tower remotes at startup, lazy load later")
+
+    --// ==============================
+    --// Macro Record + Auto Play System
+    --// Insert after:
+    --// local UseAbilityRE = TowerRE:WaitForChild("UseAbility")
+    --// ==============================
+
+    local RecordingMacro = false
+    local PlayingMacro = false
+    local MacroSessionId = 0
+    local MacroRestarting = false
+    local LastKnownWave = nil
+    local MacroSteps = {}
+    local MacroStartTime = 0
+
+    local TowerRefById = {}
+    local ReplayIdByRef = {}
+    local NextRefIndex = 0
+    local MacroHookInstalled = false
+
+    local SelectedMacroName = nil
+    local MacroLibrary = {}
+    local AutoSwitchMacro = false
+    local StageToMacro = {}
+    local SwitchDropdownRefs = {}
+    local EmptyMacroValue = "--"
+
+    local MacroDropdown
+    local MacroNameInput
+    local MacroRecordToggle
+    local MacroPlayToggle
+
+    local PendingMacroName = ""
+    local RequestRestartMacro
+    local MacroSaveFile = "SwitchHub_Macros.txt"
+
+    local function SerializeValue(v)
+        if typeof(v) == "CFrame" then
+            return {
+                __type = "CFrame",
+                data = { v:GetComponents() }
+            }
+        elseif type(v) == "table" then
+            local t = {}
+            for k, val in pairs(v) do
+                t[k] = SerializeValue(val)
+            end
+            return t
+        end
+
+        return v
+    end
+
+    local function DeserializeValue(v)
+        if type(v) == "table" and v.__type == "CFrame" then
+            return CFrame.new(unpack(v.data))
+        elseif type(v) == "table" then
+            local t = {}
+            for k, val in pairs(v) do
+                t[k] = DeserializeValue(val)
+            end
+            return t
+        end
+
+        return v
+    end
+
+    local function SaveMacros()
+        if not writefile then
+            warn("[Macro] writefile not supported")
+            return
+        end
+
+        local data = SerializeValue(MacroLibrary)
+        writefile(MacroSaveFile, game:GetService("HttpService"):JSONEncode(data))
+
+        print("[Macro] Saved macros")
+    end
+
+    --// ==============================
+    --// CARD PATH SELECTOR
+    --// ==============================
+
+    local AutoSelectPathCardEnabled = false
+
+    local PathCardPriority = {
+        -- Paths
+        ["Shared Bonds"] = 1,
+        ["Future Wealth"] = 1,
+        ["Graceful End"] = 1,
+        ["Magic's Manifest"] = 1,
+        ["Ruler's Decree"] = 1,
+
+        -- Blessing
+        ["Hyper Speed"] = 1,
+        ["Ramping Area"] = 1,
+        ["Sniper Rifle"] = 1,
+        ["Battery Charged"] = 1,
+        ["Accurate"] = 1,
+        ["Elementalist"] = 1,
+        ["Stasis"] = 1,
+        ["Bad Blood"] = 1,
+        ["Intercontinental"] = 1,
+        ["Share The Wealth"] = 1,
+        ["The Bigger They Are"] = 1,
+        ["Increased Funding"] = 1,
+        ["Fireworks"] = 1,
+        ["Sure Fire"] = 1,
+        ["Hawk-Eyed"] = 1,
+        ["Teamwide Carnage"] = 1,
+        ["Weakened"] = 1,
+        ["Shared Vision"] = 1,
+        ["Lambo"] = 1,
+        ["Marathon"] = 1,
+        ["Farmer"] = 1,
+        ["Teamwork"] = 1,
+        ["Toxic"] = 1,
+        ["Chippin' In"] = 1,
+        ["50 Cal"] = 1,
+        ["Rapid Response"] = 1,
+        ["The Harder They Fall"] = 1,
+        ["Investment"] = 1,
+        ["Global Range"] = 1,
+        ["Fleet Footed"] = 1,
+        ["Corruption"] = 1,
+        ["Opportunist"] = 1,
+        ["Telescope"] = 1,
+        ["Spy Glass"] = 1,
+        ["Uncapped Wealth"] = 1,
+        ["Binoculars"] = 1,
+        ["Solo Bomber"] = 1,
+        ["Widespread"] = 1,
+        ["Dead-Eye"] = 1,
+        ["Chromed"] = 1,
+        ["Avatar"] = 1,
+        ["Prosperous"] = 1,
+        ["Slow But Steady"] = 1,
+        ["Planet Buster"] = 1,
+        ["Max Reps"] = 1,
+        ["Slow Reactions"] = 1,
+        ["Rapid Shot"] = 1,
+        ["Second Account"] = 1,
+    }
+
+    local function GetPathCardsFolder()
+        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if not playerGui then return nil end
+
+        local gameUI = playerGui:FindFirstChild("GameUI")
+        local paths = gameUI and gameUI:FindFirstChild("Paths")
+        local selection = paths and paths:FindFirstChild("PathSelection")
+        local cards = selection and selection:FindFirstChild("Cards")
+
+        return cards
+    end
+
+    local function ClickGuiObject(gui)
+        if not gui or not gui:IsA("GuiObject") then
+            return false
+        end
+
+        local VirtualInputManager = game:GetService("VirtualInputManager")
+        local center = gui.AbsolutePosition + (gui.AbsoluteSize / 2)
+        local x = center.X
+        local y = center.Y + 36 -- ชดเชย Topbar
+
+        print("[CARD] VIM Click:", gui:GetFullName(), "X:", x, "Y:", y)
+
+        pcall(function()
+            VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+            task.wait(0.08)
+            VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+        end)
+
+        return true
+    end
+
+    local function GetAvailablePathCards()
+        local cardsFolder = GetPathCardsFolder()
+        local found = {}
+
+        if not cardsFolder then
+            warn("[CARD] Cards folder not found")
+            return found
+        end
+
+        for _, card in ipairs(cardsFolder:GetChildren()) do
+            if card:IsA("GuiObject") then
+                local title = card:FindFirstChild("Title")
+                local hitbox = card:FindFirstChild("Hitbox")
+
+                if title and title:IsA("TextLabel") then
+                    local cardName = tostring(title.Text or "")
+                    local priority = PathCardPriority[cardName]
+
+                    print("[CARD] Found:", cardName, "Priority:", tostring(priority))
+
+                    if priority then
+                        table.insert(found, {
+                            Name = cardName,
+                            Priority = priority,
+                            Card = card,
+                            ClickTarget = hitbox or card,
+                        })
+                    end
+                end
+            end
+        end
+
+        return found
+    end
+
+    local function SelectBestPathCard()
+        local cards = GetAvailablePathCards()
+
+        if #cards == 0 then
+            warn("[CARD] No matching path cards found")
+            return false
+        end
+
+        local highest = -math.huge
+        local bestCards = {}
+
+        for _, info in ipairs(cards) do
+            if info.Priority > highest then
+                highest = info.Priority
+                bestCards = { info }
+            elseif info.Priority == highest then
+                table.insert(bestCards, info)
+            end
+        end
+
+        if #bestCards == 0 then
+            return false
+        end
+
+        local selected = bestCards[math.random(1, #bestCards)]
+
+        print("[CARD] Selected:", selected.Name, "Priority:", selected.Priority)
+
+        ClickGuiObject(selected.ClickTarget)
+
+        return true
+    end
+
+    local function LoadMacros()
+        if not readfile or not isfile then
+            warn("[Macro] readfile/isfile not supported")
+            return
+        end
+
+        if not isfile(MacroSaveFile) then
+            return
+        end
+
+        local ok, decoded = pcall(function()
+            return game:GetService("HttpService"):JSONDecode(readfile(MacroSaveFile))
+        end)
+
+        if ok and type(decoded) == "table" then
+            MacroLibrary = DeserializeValue(decoded)
+            print("[Macro] Loaded macros")
+        else
+            warn("[Macro] Failed to load macros")
+        end
+    end
+
+    local function DeepCopy(t)
+        if type(t) ~= "table" then return t end
+        local copy = {}
+        for k, v in pairs(t) do
+            copy[k] = DeepCopy(v)
+        end
+        return copy
+    end
+
+    local function CleanMacroName(text)
+        return tostring(text or ""):gsub("[^%w_]", "")
+    end
+
+    local function GetMacroNames()
+        local names = {}
+        for name in pairs(MacroLibrary) do
+            table.insert(names, name)
+        end
+        table.sort(names)
+        return names
+    end
+
+    local function RefreshMacroDropdown()
+        if not MacroDropdown then return end
+
+        local names = GetMacroNames()
+
+        if #names == 0 then
+            SelectedMacroName = nil
+            MacroDropdown:SetValues({ EmptyMacroValue })
+            MacroDropdown:SetValue(EmptyMacroValue)
+            return
+        end
+
+        MacroDropdown:SetValues(names)
+
+        if not SelectedMacroName or not MacroLibrary[SelectedMacroName] then
+            SelectedMacroName = names[1]
+        end
+
+        MacroDropdown:SetValue(SelectedMacroName)
+    end
+
+    local function GetMacroDropdownValues()
+        local names = GetMacroNames()
+
+        if #names == 0 then
+            return { EmptyMacroValue }
+        end
+
+        return names
+    end
+
+    local function RefreshSwitchDropdowns()
+        local values = GetMacroDropdownValues()
+
+        for _, dropdown in pairs(SwitchDropdownRefs) do
+            pcall(function()
+                dropdown:SetValues(values)
+            end)
+        end
+    end
+
+    local function GetCurrentStageName()
+        local ok, result = pcall(function()
+            local label = LocalPlayer.PlayerGui
+                :WaitForChild("GameUI")
+                :WaitForChild("HUD")
+                :WaitForChild("StageInfos")
+                :WaitForChild("Title")
+                :WaitForChild("Stage")
+
+            local text = tostring(label.Text or "")
+            local stageName = text:match("%[(.-)%s*%-")
+            return stageName
+        end)
+
+        if ok then
+            return result
+        end
+
+        return nil
+    end
+
+    local function SetStageMacro(stageName, macroName)
+        if not stageName then return end
+
+        if not macroName or macroName == EmptyMacroValue then
+            StageToMacro[stageName] = nil
+            return
+        end
+
+        StageToMacro[stageName] = macroName
+        print("[SwitchMacro]", stageName, "=>", macroName)
+    end
+
+    local function AutoSwitchMacroByStage()
+        if not AutoSwitchMacro then return end
+
+        local stageName = GetCurrentStageName()
+        if not stageName then return end
+
+        local targetMacro = StageToMacro[stageName]
+        if not targetMacro then return end
+        if not MacroLibrary[targetMacro] then return end
+
+        if SelectedMacroName ~= targetMacro then
+            SelectedMacroName = targetMacro
+            RefreshMacroDropdown()
+            RefreshSwitchDropdowns()
+
+            print("[SwitchMacro] Auto switched:", stageName, "=>", targetMacro)
+
+            if MacroPlayToggle and Options.MacroPlayToggle.Value then
+                RequestRestartMacro()
+            end
+        end
+    end
+
+    local function AddStageMacroDropdown(optionName, stageName)
+        local dropdown = Tabs.SwitchMacro:AddDropdown(optionName, {
+            Title = stageName,
+            Description = "เลือกมาโครสำหรับ " .. stageName,
+            Values = GetMacroDropdownValues(),
+            Multi = false,
+            Default = 1
+        })
+
+        SwitchDropdownRefs[stageName] = dropdown
+
+        dropdown:OnChanged(function(Value)
+            SetStageMacro(stageName, Value)
+        end)
+
+        return dropdown
+    end
+
+    local function NewTowerRef()
+        NextRefIndex += 1
+        return "tower_" .. tostring(NextRefIndex)
+    end
+
+    local function GetTowerRef(unitId)
+        unitId = tostring(unitId)
+
+        if not TowerRefById[unitId] then
+            TowerRefById[unitId] = NewTowerRef()
+        end
+
+        return TowerRefById[unitId]
+    end
+
+    local function GetPlacedTowerIds()
+        local ids = {}
+
+        local ignore = workspace:FindFirstChild("Ignore")
+        local hitboxes = ignore and ignore:FindFirstChild("Hitboxes")
+
+        if not hitboxes then
+            return ids
+        end
+
+        for _, hitbox in ipairs(hitboxes:GetChildren()) do
+            local towerValue = hitbox:FindFirstChild("Tower")
+
+            if towerValue and towerValue:IsA("ObjectValue") and towerValue.Value then
+                table.insert(ids, tostring(towerValue.Value))
+            end
+        end
+
+        return ids
+    end
+
+    local function SnapshotTowerIds()
+        local set = {}
+
+        for _, id in ipairs(GetPlacedTowerIds()) do
+            set[id] = true
+        end
+
+        return set
+    end
+
+    local function FindNewTowerId(beforeSet, timeout)
+        local start = os.clock()
+        timeout = timeout or 3
+
+        while os.clock() - start <= timeout do
+            for _, id in ipairs(GetPlacedTowerIds()) do
+                if not beforeSet[id] then
+                    return id
+                end
+            end
+
+            task.wait(0.1)
+        end
+
+        return nil
+    end
+
+    local function ResetMacroRecord()
+        table.clear(MacroSteps)
+        table.clear(TowerRefById)
+        table.clear(ReplayIdByRef)
+
+        NextRefIndex = 0
+        MacroStartTime = os.clock()
+    end
+
+    local function StartRecord()
+        if IsLobby() then
+            Fluent:Notify({
+                Title = "Macro",
+                Content = "Record works only inside stage",
+                Duration = 3
+            })
+            return false
+        end
+
+        if PlayingMacro then
+            Fluent:Notify({
+                Title = "Macro",
+                Content = "Stop Play first",
+                Duration = 3
+            })
+            return false
+        end
+
+        if not SelectedMacroName or not MacroLibrary[SelectedMacroName] then
+            Fluent:Notify({
+                Title = "Macro",
+                Content = "Create or select Macro first",
+                Duration = 3
+            })
+            return false
+        end
+
+        ResetMacroRecord()
+        RecordingMacro = true
+
+        Fluent:Notify({
+            Title = "Macro",
+            Content = "Recording: " .. SelectedMacroName,
+            Duration = 3
+        })
+
+        return true
+    end
+
+    local function StopRecord()
+        RecordingMacro = false
+
+        if SelectedMacroName and MacroLibrary[SelectedMacroName] then
+            MacroLibrary[SelectedMacroName].Steps = DeepCopy(MacroSteps)
+            SaveMacros()
+
+            Fluent:Notify({
+                Title = "Macro",
+                Content = "Saved " .. tostring(#MacroSteps) .. " steps",
+                Duration = 3
+            })
+        end
+    end
+
+    local function WaitForReplayId(ref, timeout)
+        local start = os.clock()
+        timeout = timeout or 10
+
+        while PlayingMacro and os.clock() - start <= timeout do
+            if ReplayIdByRef[ref] then
+                return ReplayIdByRef[ref]
+            end
+            task.wait(0.1)
+        end
+
+        return nil
+    end
+
+    local function GetMoney()
+        local player = game:GetService("Players").LocalPlayer
+
+        local label = player.PlayerGui
+            :WaitForChild("GameUI")
+            :WaitForChild("HUD")
+            :WaitForChild("Bottom")
+            :WaitForChild("Hotbar")
+            :WaitForChild("Currencies")
+            :WaitForChild("Yen")
+            :WaitForChild("Amount")
+            :WaitForChild("TextLabel")
+
+        local text = label.Text or "0"
+
+        text = text:gsub(",", ""):gsub("%D", "")
+
+        return tonumber(text) or 0
+    end
+
+    local function FindTowerIdNearCFrame(cframe, maxDistance)
+        maxDistance = maxDistance or 8
+
+        local ignore = workspace:FindFirstChild("Ignore")
+        local hitboxes = ignore and ignore:FindFirstChild("Hitboxes")
+        if not hitboxes then return nil end
+
+        local targetPos = cframe.Position
+        local bestId = nil
+        local bestDist = math.huge
+
+        for _, hitbox in ipairs(hitboxes:GetChildren()) do
+            local towerValue = hitbox:FindFirstChild("Tower")
+
+            if towerValue and towerValue:IsA("ObjectValue") and towerValue.Value then
+                local pos
+
+                if hitbox:IsA("BasePart") then
+                    pos = hitbox.Position
+                elseif hitbox:IsA("Model") then
+                    pos = hitbox:GetPivot().Position
+                end
+
+                if pos then
+                    local dist = (pos - targetPos).Magnitude
+                    if dist < bestDist and dist <= maxDistance then
+                        bestDist = dist
+                        bestId = tostring(towerValue.Value)
+                    end
+                end
+            end
+        end
+
+        return bestId
+    end
+
+    local function GetWave()
+        local player = game:GetService("Players").LocalPlayer
+
+        local label = player.PlayerGui
+            :WaitForChild("GameUI")
+            :WaitForChild("HUD")
+            :WaitForChild("Upper")
+            :WaitForChild("WaveInformations")
+            :WaitForChild("Container")
+            :WaitForChild("Wave")
+
+        local text = tostring(label.Text or "")
+
+        text = text:gsub("<.->", "")
+
+        local current, max = text:match("Wave%s*(%d+)%s*/%s*(%d+)")
+
+        current = tonumber(current)
+        max = tonumber(max)
+
+        print("[Wave Debug]", text, "=>", current, "/", max)
+
+        return current, max
+    end
+
+    local PlayMacroSteps
+
+    RequestRestartMacro = function()
+        if MacroRestarting then return end
+        if not MacroPlayToggle or not Options.MacroPlayToggle.Value then return end
+        if not SelectedMacroName or not MacroLibrary[SelectedMacroName] then return end
+
+        local steps = MacroLibrary[SelectedMacroName].Steps
+        if not steps or #steps == 0 then return end
+
+        MacroRestarting = true
+        MacroSessionId += 1
+        PlayingMacro = false
+        table.clear(ReplayIdByRef)
+
+        print("[Macro] Restart requested")
+
+        task.delay(0.3, function()
+            if MacroPlayToggle and Options.MacroPlayToggle.Value then
+                print("[Macro] Restarting from step 1")
+                MacroRestarting = false
+                PlayMacroSteps(DeepCopy(steps))
+            else
+                MacroRestarting = false
+            end
+        end)
+    end
+
+    local function StartWaveWatcher()
+        task.spawn(function()
+            while true do
+                task.wait(0.3)
+
+                if not MacroPlayToggle or not Options.MacroPlayToggle.Value then
+                    return
+                end
+
+                local wave = GetWave()
+
+                if wave then
+                    if LastKnownWave and LastKnownWave > 1 and wave == 1 then
+                        print("[Macro] Wave RESET detected")
+                        RequestRestartMacro()
+                        task.wait(1)
+                    end
+
+                    LastKnownWave = wave
+                end
+            end
+        end)
+    end
+
+    PlayMacroSteps = function(steps)
+        if PlayingMacro then return end
+
+        MacroSessionId += 1
+        local thisSession = MacroSessionId
+
+        PlayingMacro = true
+        LastKnownWave = GetWave()
+        table.clear(ReplayIdByRef)
+
+        StartWaveWatcher()
+
+        task.spawn(function()
+            local playStart = os.clock()
+
+            for _, step in ipairs(steps) do
+                if not PlayingMacro or thisSession ~= MacroSessionId then
+                    break
+                end
+
+                local waitTime = step.Time - (os.clock() - playStart)
+
+                if waitTime > 0 then
+                    task.wait(waitTime)
+                end
+
+                if step.Type == "Place" then
+                    local placed = false
+                    local newId = nil
+
+                    while PlayingMacro and thisSession == MacroSessionId and not placed do
+                        local before = SnapshotTowerIds()
+
+                        pcall(function()
+                            PlaceUnitRF:InvokeServer(step.Slot, step.CFrame)
+                        end)
+
+                        newId = FindNewTowerId(before, 1.5)
+
+                        if newId then
+                            placed = true
+                            ReplayIdByRef[step.Ref] = newId
+                            print("[Macro Play] Place success:", step.Ref, "=>", newId)
+                        else
+                            warn("[Macro Play] Place failed / not enough money, retrying...")
+                            task.wait(1)
+                        end
+                    end
+
+                elseif step.Type == "Upgrade" then
+                    local unitId = WaitForReplayId(step.TargetRef, 10) or step.RawUnitId
+
+                    if unitId then
+                        local upgraded = false
+
+                        while PlayingMacro and thisSession == MacroSessionId and not upgraded do
+                            local beforeMoney = GetMoney()
+
+                            pcall(function()
+                                UpgradeUnitRF:InvokeServer(unitId)
+                            end)
+
+                            task.wait(0.6)
+
+                            local afterMoney = GetMoney()
+
+                            if afterMoney < beforeMoney then
+                                upgraded = true
+                                print("[Macro Play] Upgrade success:", unitId, beforeMoney, "=>", afterMoney)
+                            else
+                                warn("[Macro Play] Not enough money / retrying upgrade...")
+                                task.wait(1)
+                            end
+                        end
+                    end
+
+                elseif step.Type == "Sell" then
+                    local unitId = WaitForReplayId(step.TargetRef, 10) or step.RawUnitId
+
+                    if unitId then
+                        pcall(function()
+                            SellUnitRF:InvokeServer(unitId)
+                        end)
+
+                        ReplayIdByRef[step.TargetRef] = nil
+                        print("[Macro Play] Sell:", unitId)
+                    end
+
+                elseif step.Type == "Ability" then
+                    local unitId = WaitForReplayId(step.TargetRef, 10) or step.RawUnitId
+
+                    if unitId then
+                        local used = false
+
+                        while PlayingMacro and thisSession == MacroSessionId and not used do
+                            local beforeMoney = GetMoney()
+
+                            pcall(function()
+                                UseAbilityRE:FireServer(unitId, step.AbilityIndex, step.AbilityName)
+                            end)
+
+                            task.wait(0.5)
+
+                            local afterMoney = GetMoney()
+
+                            if afterMoney < beforeMoney then
+                                used = true
+                                print("[Macro Play] Ability used:", step.AbilityName)
+                            else
+                                task.wait(1)
+                            end
+                        end
+                    end
+
+                elseif step.Type == "ToggleAutoUpgrade" then
+                    local unitId = WaitForReplayId(step.TargetRef, 10) or step.RawUnitId
+
+                    if unitId then
+                        pcall(function()
+                            ToggleAutoUpgradeRF:InvokeServer(unitId)
+                        end)
+
+                        print("[Macro Play] ToggleAutoUpgrade:", unitId)
+                    end
+
+                elseif step.Type == "AutoUpgradePriority" then
+                    local unitId = WaitForReplayId(step.TargetRef, 10) or step.RawUnitId
+
+                    if unitId then
+                        pcall(function()
+                            IncrementAutoUpgradePriorityRF:InvokeServer(unitId)
+                        end)
+
+                        print("[Macro Play] AutoUpgradePriority:", unitId)
+                    end
+                end
+            end
+
+            if thisSession == MacroSessionId then
+                PlayingMacro = false
+            end
+
+            if thisSession == MacroSessionId and MacroPlayToggle and Options.MacroPlayToggle.Value then
+                task.spawn(function()
+                    print("[Macro] Finished steps, waiting for Wave 1...")
+
+                    while MacroPlayToggle and Options.MacroPlayToggle.Value do
+                        task.wait(0.5)
+
+                        local current = GetWave()
+
+                        if current == 1 then
+                            print("[Macro] Wave 1 detected after finish, restarting")
+                            RequestRestartMacro()
+                            break
+                        end
+                    end
+                end)
+            end
+
+            Fluent:Notify({
+                Title = "Macro",
+                Content = "Play finished",
+                Duration = 3
+            })
+        end)
+    end
+
+    local function StartPlay()
+        if IsLobby() then
+            Fluent:Notify({
+                Title = "Macro",
+                Content = "Macro works only inside stage",
+                Duration = 3
+            })
+            return false
+        end
+
+        if RecordingMacro then
+            Fluent:Notify({
+                Title = "Macro",
+                Content = "Stop Record first",
+                Duration = 3
+            })
+            return false
+        end
+
+        if not SelectedMacroName or not MacroLibrary[SelectedMacroName] then
+            Fluent:Notify({
+                Title = "Macro",
+                Content = "Select Macro first",
+                Duration = 3
+            })
+            return false
+        end
+
+        local steps = MacroLibrary[SelectedMacroName].Steps
+
+        if not steps or #steps == 0 then
+            Fluent:Notify({
+                Title = "Macro",
+                Content = "Macro has no steps",
+                Duration = 3
+            })
+            return false
+        end
+
+        PlayMacroSteps(DeepCopy(steps))
+
+        Fluent:Notify({
+            Title = "Macro",
+            Content = "Playing: " .. SelectedMacroName,
+            Duration = 3
+        })
+
+        return true
+    end
+
+    local function StopPlay()
+        PlayingMacro = false
+        table.clear(ReplayIdByRef)
+
+        Fluent:Notify({
+            Title = "Macro",
+            Content = "Play stopped",
+            Duration = 3
+        })
+    end
+
+    local function InstallMacroHook()
+        if MacroHookInstalled then return end
+        MacroHookInstalled = true
+
+        local oldNamecall
+        oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            local args = { ... }
+
+            local isRecording = RecordingMacro and not PlayingMacro
+
+            local results = table.pack(oldNamecall(self, ...))
+
+            if isRecording then
+                if self == PlaceUnitRF and method == "InvokeServer" then
+                    local slot = args[1]
+                    local cframe = args[2]
+                    local recordTime = os.clock() - MacroStartTime
+
+                    task.spawn(function()
+                        task.wait(0.5)
+
+                        if not RecordingMacro or PlayingMacro then return end
+
+                        local newId = FindTowerIdNearCFrame(cframe, 8)
+
+                        if not newId then
+                            warn("[Macro Record] Place ignored: tower not found near position")
+                            return
+                        end
+
+                        local ref = GetTowerRef(newId)
+
+                        table.insert(MacroSteps, {
+                            Time = recordTime,
+                            Type = "Place",
+                            Slot = slot,
+                            CFrame = cframe,
+                            Ref = ref,
+                            RawUnitId = newId
+                        })
+
+                        print("[Macro Record] Place success | Step:", #MacroSteps, "| Ref:", ref, "| ID:", newId)
+                    end)
+
+                elseif self == UpgradeUnitRF and method == "InvokeServer" then
+                    local unitId = tostring(args[1])
+                    local success = results[1]
+                    local message = results[2]
+
+                    if success == true and message == "Unit Upgraded!" then
+                        local ref = GetTowerRef(unitId)
+
+                        table.insert(MacroSteps, {
+                            Time = os.clock() - MacroStartTime,
+                            Type = "Upgrade",
+                            TargetRef = ref,
+                            RawUnitId = unitId
+                        })
+
+                        print("[Macro Record] Upgrade success | Step:", #MacroSteps)
+                    else
+                        warn("[Macro Record] Upgrade ignored:", tostring(message))
+                    end
+
+                elseif self == ToggleAutoUpgradeRF and method == "InvokeServer" then
+                    local unitId = tostring(args[1])
+                    local ref = GetTowerRef(unitId)
+
+                    table.insert(MacroSteps, {
+                        Time = os.clock() - MacroStartTime,
+                        Type = "ToggleAutoUpgrade",
+                        TargetRef = ref,
+                        RawUnitId = unitId
+                    })
+
+                    print("[Macro Record] ToggleAutoUpgrade | Step:", #MacroSteps)
+
+                elseif self == IncrementAutoUpgradePriorityRF and method == "InvokeServer" then
+                    local unitId = tostring(args[1])
+                    local ref = GetTowerRef(unitId)
+
+                    table.insert(MacroSteps, {
+                        Time = os.clock() - MacroStartTime,
+                        Type = "AutoUpgradePriority",
+                        TargetRef = ref,
+                        RawUnitId = unitId
+                    })
+
+                    print("[Macro Record] AutoUpgradePriority | Step:", #MacroSteps)
+
+                elseif self == SellUnitRF and method == "InvokeServer" then
+                    local unitId = tostring(args[1])
+                    local ref = GetTowerRef(unitId)
+
+                    table.insert(MacroSteps, {
+                        Time = os.clock() - MacroStartTime,
+                        Type = "Sell",
+                        TargetRef = ref,
+                        RawUnitId = unitId
+                    })
+
+                    print("[Macro Record] Sell | Step:", #MacroSteps)
+
+                elseif self == UseAbilityRE and method == "FireServer" then
+                    local unitId = tostring(args[1])
+                    local ref = GetTowerRef(unitId)
+
+                    table.insert(MacroSteps, {
+                        Time = os.clock() - MacroStartTime,
+                        Type = "Ability",
+                        TargetRef = ref,
+                        RawUnitId = unitId,
+                        AbilityIndex = args[2],
+                        AbilityName = args[3]
+                    })
+
+                    print("[Macro Record] Ability | Step:", #MacroSteps)
+                end
+            end
+
+            return table.unpack(results, 1, results.n)
+        end))
+
+        print("[Macro] Hook installed")
+    end
+
+    if not PlaceUnitRF or not UpgradeUnitRF or not SellUnitRF or not UseAbilityRE then
+        warn("[Macro] Tower remotes not ready. Macro hook skipped.")
+    else
+        InstallMacroHook()
+    end
+
+    task.spawn(function()
+        while task.wait(1) do
+            if IsInMatch() and MacroPlayToggle and Options.MacroPlayToggle.Value then
+                AutoSwitchMacroByStage()
+            end
+        end
+    end)
+
+    --// ==============================
+    --// AUTO PLAY PATH PRO - STABLE PATH VERSION
+    --// ใช้ workspace.Map.Path โดยตรง
+    --// ==============================
+
+    local AutoPlayEnabled = false
+    local AutoPlaceEnabled = false
+    local AutoUpgradeEnabled = false
+
+    local PathConfig = {
+        SlotPriority = {1, 2, 3, 4, 5, 6},
+        MaxUnits = 12,
+        UpgradeMoney = 300,
+        MinDistance = 5,
+        PlaceRadiusMin = 4,
+        PlaceRadiusMax = 10,
+        PlaceCooldown = 1.2,
+        UpgradeCooldown = 0.8,
+    }
+
+    local LastPlaceTick = 0
+    local LastUpgradeTick = 0
+    local CachedChoke = nil
+    local LastChokeScan = 0
+
+    local function GetMoneySafe()
+        local ok, value = pcall(function()
+            local text = LocalPlayer.PlayerGui.GameUI.HUD.Bottom.Hotbar.Currencies.Yen.Amount.TextLabel.Text
+            text = tostring(text):gsub(",", ""):gsub("%D", "")
+            return tonumber(text) or 0
+        end)
+
+        return ok and value or 0
+    end
+
+    local function ExtractNumber(text)
+        text = tostring(text or "")
+
+        local result = ""
+
+        for i = 1, #text do
+            local c = text:sub(i, i)
+
+            if c >= "0" and c <= "9" then
+                result ..= c
+            end
+        end
+
+        local number = tonumber(result)
+
+        print("[PRICE DEBUG]",
+            "Raw:", text,
+            "| Digits:", result,
+            "| Number:", tostring(number)
+        )
+
+        return number or 0
+    end
+
+    local function GetDeckUnitsSortedByPrice()
+        local result = {}
+
+        local ok, units = pcall(function()
+            return LocalPlayer.PlayerGui.GameUI.HUD.Bottom.Hotbar.Units
+        end)
+
+        if not ok or not units then
+            warn("[DECK DEBUG] Units path not found")
+            return result
+        end
+
+        local frames = {}
+
+        for _, child in ipairs(units:GetChildren()) do
+            if child:IsA("Frame") and child:FindFirstChild("Unit") then
+                table.insert(frames, child)
+            end
+        end
+
+        -- เรียงตามตำแหน่งซ้าย -> ขวา แทน LayoutOrder เพราะ LayoutOrder = 0 หมด
+        table.sort(frames, function(a, b)
+            return a.AbsolutePosition.X < b.AbsolutePosition.X
+        end)
+
+        local remoteSlot = 1
+
+        for _, slotFrame in ipairs(frames) do
+            local unitFrame = slotFrame:FindFirstChild("Unit")
+            local unitInfo = unitFrame and unitFrame:FindFirstChild("UnitInfomation")
+            local rightInfos = unitInfo and unitInfo:FindFirstChild("RightInfos")
+
+            local nameLabel = rightInfos and rightInfos:FindFirstChild("UnitName")
+            local priceLabel = rightInfos and rightInfos:FindFirstChild("UnitPrice")
+
+            local unitName = nameLabel and tostring(nameLabel.Text) or "Unknown"
+            local priceText = priceLabel and tostring(priceLabel.Text) or "0"
+            local price = ExtractNumber(priceText)
+
+            print("[DECK DEBUG]",
+                "Frame:", slotFrame.Name,
+                "| RemoteSlot:", remoteSlot,
+                "| Name:", unitName,
+                "| PriceText:", priceText,
+                "| Price:", price,
+                "| X:", slotFrame.AbsolutePosition.X
+            )
+
+            if unitName ~= "Unknown"
+            and unitName ~= ""
+            and price > 0 then
+                table.insert(result, {
+                    Slot = remoteSlot,
+                    Name = unitName,
+                    Price = price,
+                    FrameName = slotFrame.Name
+                })
+
+                remoteSlot += 1
+            end
+        end
+
+        table.sort(result, function(a, b)
+            return a.Price < b.Price
+        end)
+
+        print("[DECK DEBUG] Final deck count:", #result)
+
+        for _, unit in ipairs(result) do
+            print("[DECK DEBUG] Final:", unit.Name, "Slot:", unit.Slot, "Price:", unit.Price)
+        end
+
+        return result
+    end
+
+    local function GetTowerIdFromHitbox(hitbox)
+        local towerValue = hitbox:FindFirstChild("Tower")
+        if not towerValue or not towerValue.Value then return nil end
+
+        if typeof(towerValue.Value) == "Instance" then
+            return towerValue.Value.Name
+        end
+
+        return tostring(towerValue.Value)
+    end
+
+    local function GetAllTowers()
+        local list = {}
+
+        local hitboxes = workspace:FindFirstChild("Ignore")
+            and workspace.Ignore:FindFirstChild("Hitboxes")
+
+        if not hitboxes then return list end
+
+        for _, hitbox in ipairs(hitboxes:GetChildren()) do
+            local id = GetTowerIdFromHitbox(hitbox)
+
+            if id and not tonumber(id) then
+                table.insert(list, id)
+            end
+        end
+
+        return list
+    end
+
+    local function GetInstancePosition(obj)
+        if not obj then return nil end
+
+        if obj:IsA("BasePart") then
+            return obj.Position
+        end
+
+        if obj:IsA("Model") then
+            return obj:GetPivot().Position
+        end
+
+        if obj:IsA("Attachment") then
+            return obj.WorldPosition
+        end
+
+        if obj:IsA("Vector3Value") then
+            return obj.Value
+        end
+
+        if obj:IsA("CFrameValue") then
+            return obj.Value.Position
+        end
+
+        if obj:IsA("Folder") then
+            local part = obj:FindFirstChildWhichIsA("BasePart", true)
+            if part then
+                return part.Position
+            end
+
+            local att = obj:FindFirstChildWhichIsA("Attachment", true)
+            if att then
+                return att.WorldPosition
+            end
+        end
+
+        return nil
+    end
+
+    local function GetFrontEnemyPosition()
+        local units = workspace:FindFirstChild("Ignore")
+            and workspace.Ignore:FindFirstChild("Units")
+
+        if not units then
+            warn("[AUTO PLAY] workspace.Ignore.Units not found")
+            return nil
+        end
+
+        local bestEnemy = nil
+        local bestNumber = math.huge
+
+        for _, enemy in ipairs(units:GetChildren()) do
+            local n = tonumber(enemy.Name)
+
+            if n and n < bestNumber then
+                local pos = GetInstancePosition(enemy)
+                if pos then
+                    bestNumber = n
+                    bestEnemy = enemy
+                end
+            end
+        end
+
+        if not bestEnemy then
+            return nil
+        end
+
+        local pos = GetInstancePosition(bestEnemy)
+
+        print("[AUTO PLAY] Front enemy:", bestEnemy.Name, pos)
+
+        return pos
+    end
+
+    local function FindBestChokePoint()
+        local enemyPos = GetFrontEnemyPosition()
+
+        if enemyPos then
+            CachedChoke = enemyPos
+            return enemyPos
+        end
+
+        return CachedChoke
+    end
+
+    local function IsFarFromOtherTowers(pos)
+        local hitboxes = workspace:FindFirstChild("Ignore")
+            and workspace.Ignore:FindFirstChild("Hitboxes")
+
+        if not hitboxes then return true end
+
+        for _, hitbox in ipairs(hitboxes:GetChildren()) do
+            local hpos = GetInstancePosition(hitbox)
+
+            if hpos and (hpos - pos).Magnitude < PathConfig.MinDistance then
+                return false
+            end
+        end
+
+        return true
+    end
+
+    local function GenerateSmartSpots(center)
+        local spots = {}
+
+        for radius = PathConfig.PlaceRadiusMin, PathConfig.PlaceRadiusMax, 2 do
+            for angle = 0, 345, 15 do
+                local rad = math.rad(angle)
+
+                local pos = center + Vector3.new(
+                    math.cos(rad) * radius,
+                    0,
+                    math.sin(rad) * radius
+                )
+
+                if IsFarFromOtherTowers(pos) then
+                    table.insert(spots, CFrame.new(pos))
+                end
+            end
+        end
+
+        return spots
+    end
+
+    local function AutoPlaceSlot(slot)
+        if not PlaceUnitRF then
+            warn("[PLACE DEBUG] PlaceUnitRF nil")
+            return false
+        end
+
+        if os.clock() - LastPlaceTick < PathConfig.PlaceCooldown then
+            print("[PLACE DEBUG] Cooldown")
+            return false
+        end
+
+        local choke = FindBestChokePoint()
+        if not choke then
+            warn("[PLACE DEBUG] No choke/front enemy position")
+            return false
+        end
+
+        local spots = GenerateSmartSpots(choke)
+        print("[PLACE DEBUG] Try slot:", slot, "spots:", #spots, "center:", choke)
+
+        for i, cf in ipairs(spots) do
+            local before = SnapshotTowerIds()
+
+            local ok, r1, r2 = pcall(function()
+                return PlaceUnitRF:InvokeServer(slot, cf)
+            end)
+
+            print("[PLACE DEBUG] Attempt:", i, "Slot:", slot, "ok:", ok, "r1:", tostring(r1), "r2:", tostring(r2), "pos:", cf.Position)
+
+            local newId = FindNewTowerId(before, 0.8)
+
+            if newId then
+                LastPlaceTick = os.clock()
+                print("[PLACE DEBUG] SUCCESS | Slot:", slot, "| ID:", newId)
+                return true
+            end
+
+            task.wait(0.04)
+        end
+
+        warn("[PLACE DEBUG] Failed all spots for slot:", slot)
+        return false
+    end
+
+    local PlacedSlotMap = {}
+
+    local function GetPlacedSlotCount()
+        local count = 0
+
+        for _, _ in pairs(PlacedSlotMap) do
+            count += 1
+        end
+
+        return count
+    end
+
+    local function GetDeckSlotCount(deck)
+        local count = 0
+
+        for _, unit in ipairs(deck) do
+            if unit.Price > 0 then
+                count += 1
+            end
+        end
+
+        return count
+    end
+
+    local function AutoPlace()
+        local towerCount = #GetAllTowers()
+
+        if towerCount >= PathConfig.MaxUnits then
+            print("[AUTO PLAY] Max units reached:", towerCount)
+            return true
+        end
+
+        local money = GetMoneySafe()
+        local deck = GetDeckUnitsSortedByPrice()
+        local needSlotCount = GetDeckSlotCount(deck)
+        local placedSlotCount = GetPlacedSlotCount()
+
+        print("[AUTO PLAY] Money:", money, "Deck:", #deck, "PlacedSlots:", placedSlotCount, "/", needSlotCount)
+
+        if #deck == 0 then
+            warn("[AUTO PLAY] Deck empty")
+            return false
+        end
+
+        -- วางให้ครบทุก Slot ก่อน
+        for _, unit in ipairs(deck) do
+            if not PlacedSlotMap[unit.Slot] then
+                print("[AUTO PLAY] Need place:", unit.Name, "Slot:", unit.Slot, "Price:", unit.Price)
+
+                if money >= unit.Price then
+                    if AutoPlaceSlot(unit.Slot) then
+                        PlacedSlotMap[unit.Slot] = true
+                        print("[AUTO PLAY] Slot placed:", unit.Slot, unit.Name)
+                        return false
+                    end
+                else
+                    print("[AUTO PLAY] Not enough money:", unit.Name, money, "/", unit.Price)
+                end
+
+                return false
+            end
+        end
+
+        print("[AUTO PLAY] All slots placed")
+        return true
+    end
+
+    local function AutoUpgrade()
+        if not UpgradeUnitRF then return end
+        if os.clock() - LastUpgradeTick < PathConfig.UpgradeCooldown then return end
+
+        if GetMoneySafe() < PathConfig.UpgradeMoney then return end
+
+        for _, unitId in ipairs(GetAllTowers()) do
+            local ok, success, message = pcall(function()
+                return UpgradeUnitRF:InvokeServer(unitId)
+            end)
+
+            print("[PATH] Upgrade try:", unitId, ok, tostring(success), tostring(message))
+
+            if ok and success == true then
+                LastUpgradeTick = os.clock()
+                print("[PATH] Upgrade success:", unitId)
+                return
+            end
+
+            task.wait(0.2)
+        end
+    end
+
+    local function EnsureTowerRemotes()
+        if PlaceUnitRF and UpgradeUnitRF then
+            return true
+        end
+
+        if not IsInMatch() then
+            return false
+        end
+
+        TowerService = TowerService or WaitForService("TowerService", 10)
+        DataService = DataService or WaitForService("DataService", 10)
+
+        TowerRF = TowerService and TowerService:WaitForChild("RF", 10)
+        TowerRE = TowerService and TowerService:WaitForChild("RE", 10)
+        DataRF = DataService and DataService:WaitForChild("RF", 10)
+
+        PlaceUnitRF = TowerRF and TowerRF:WaitForChild("PlaceUnit", 10)
+        UpgradeUnitRF = TowerRF and TowerRF:WaitForChild("UpgradeUnit", 10)
+        SellUnitRF = TowerRF and TowerRF:WaitForChild("SellUnit", 10)
+
+        UseAbilityRE = TowerRE and TowerRE:WaitForChild("UseAbility", 10)
+
+        ToggleAutoUpgradeRF = DataRF and DataRF:WaitForChild("ToggleAutoUpgrade", 10)
+        IncrementAutoUpgradePriorityRF = DataRF and DataRF:WaitForChild("IncrementAutoUpgradePriority", 10)
+
+        print("[AUTO PLAY] Remotes loaded:", PlaceUnitRF ~= nil, UpgradeUnitRF ~= nil)
+
+        return PlaceUnitRF and UpgradeUnitRF
+    end
+
+    task.spawn(function()
+        while task.wait(0.6) do
+            if Fluent.Unloaded then break end
+
+            if IsInMatch() and AutoPlayEnabled then
+                if not EnsureTowerRemotes() then
+                    warn("[AUTO PLAY] Tower remotes not ready")
+                    continue
+                end
+
+                if #GetAllTowers() == 0 then
+                    table.clear(PlacedSlotMap)
+                end
+
+                local allSlotsPlaced = true
+
+                if AutoPlaceEnabled then
+                    allSlotsPlaced = AutoPlace()
+                end
+
+                if AutoUpgradeEnabled and allSlotsPlaced then
+                    AutoUpgrade()
+                end
+            end
+        end
+    end)
+
+    --// ==============================
+    --// Macro UI
+    --// ใช้ Tabs.Marco เดิมของคุณ
+    --// ==============================
+
+    Tabs.Marco:AddSection("Macro Creation")
+
+    MacroNameInput = Tabs.Marco:AddInput("MacroNameInput", {
+        Title = "Macro Name",
+        Description = "ตั้งชื่อมาโครเฉพาะใช้ได้แค่ (ภาษาอังกฤษ) เท่านั้น",
+        Default = "",
+        Placeholder = "Example: StoryOne",
+        Numeric = false,
+        Finished = false,
+        Callback = function(Value)
+            local clean = CleanMacroName(Value)
+            PendingMacroName = clean
+
+            if MacroNameInput and tostring(MacroNameInput.Value or "") ~= clean then
+                task.defer(function()
+                    pcall(function()
+                        MacroNameInput:SetValue(clean)
+                    end)
+                end)
+            end
+        end
+    })
+
+    Tabs.Marco:AddButton({
+        Title = "Create Macro",
+        Description = "สร้างมาโครใหม่จากชื่อที่กรอกไว้",
+        Callback = function()
+            local name = CleanMacroName(PendingMacroName)
+
+            if name == "" then
+                Fluent:Notify({
+                    Title = "Macro",
+                    Content = "Macro name cannot be empty",
+                    Duration = 3
+                })
+                return
+            end
+
+            if MacroLibrary[name] then
+                Fluent:Notify({
+                    Title = "Macro",
+                    Content = "Macro already exists",
+                    Duration = 3
+                })
+                return
+            end
+
+            MacroLibrary[name] = {
+                Steps = {}
+            }
+
+            SelectedMacroName = name
+            RefreshMacroDropdown()
+            RefreshSwitchDropdowns()
+            SaveMacros()
+
+            Fluent:Notify({
+                Title = "Macro",
+                Content = "Created: " .. name,
+                Duration = 3
+            })
+        end
+    })
+
+    Tabs.Marco:AddButton({
+        Title = "Delete Macro",
+        Description = "ลบมาโครที่เลือกอยู่ตอนนี้ออกจากรายการ",
+        Callback = function()
+            if not SelectedMacroName or not MacroLibrary[SelectedMacroName] then
+                Fluent:Notify({
+                    Title = "Macro",
+                    Content = "No Macro selected",
+                    Duration = 3
+                })
+                return
+            end
+
+            RecordingMacro = false
+            PlayingMacro = false
+
+            MacroLibrary[SelectedMacroName] = nil
+            SelectedMacroName = nil
+
+            RefreshMacroDropdown()
+            RefreshSwitchDropdowns()
+            SaveMacros()
+
+            Fluent:Notify({
+                Title = "Macro",
+                Content = "Deleted Macro",
+                Duration = 3
+            })
+        end
+    })
+
+    MacroDropdown = Tabs.Marco:AddDropdown("MacroSelect", {
+        Title = "Select Macro",
+        Description = "เลือกมาโครที่ต้องการอัด เล่นซ้ำ ส่งออก หรือแก้ไข",
+        Values = { EmptyMacroValue },
+        Multi = false,
+        Default = 1
+    })
+
+    MacroDropdown:OnChanged(function(Value)
+        if Value == EmptyMacroValue then
+            SelectedMacroName = nil
+            return
+        end
+
+        SelectedMacroName = Value
+    end)
+
+    Tabs.Marco:AddButton({
+        Title = "Refresh Macro List",
+        Description = "รีเฟรชรายการ Macro",
+        Callback = function()
+            RefreshMacroDropdown()
+            RefreshSwitchDropdowns()
+        end
+    })
+
+    Tabs.Marco:AddSection("Record Section")
+
+    MacroRecordToggle = Tabs.Marco:AddToggle("MacroRecordToggle", {
+        Title = "Record Macro",
+        Description = "เปิดเพื่อเริ่มบันทึก Macro",
+        Default = false
+    })
+
+    MacroRecordToggle:OnChanged(function()
+        local state = Options.MacroRecordToggle.Value
+
+        if state then
+            local ok = StartRecord()
+
+            if not ok then
+                task.defer(function()
+                    pcall(function()
+                        MacroRecordToggle:SetValue(false)
+                    end)
+                end)
+            end
+        else
+            if RecordingMacro then
+                StopRecord()
+            end
+        end
+    end)
+
+    Tabs.Marco:AddSection("Play Section")
+
+    MacroPlayToggle = Tabs.Marco:AddToggle("MacroPlayToggle", {
+        Title = "Play Macro",
+        Description = "เปิดเพื่อเล่น Macro ที่เลือก",
+        Default = false
+    })
+
+    MacroPlayToggle:OnChanged(function()
+        local state = Options.MacroPlayToggle.Value
+
+        if state then
+            local ok = StartPlay()
+
+            if not ok then
+                task.defer(function()
+                    pcall(function()
+                        MacroPlayToggle:SetValue(false)
+                    end)
+                end)
+            end
+        else
+            if PlayingMacro then
+                StopPlay()
+            end
+        end
+    end)
+
+    Tabs.Marco:AddSection("Share Config")
+
+    Tabs.Marco:AddButton({
+        Title = "Export Macro JSON",
+        Description = "คัดลอกมาโครที่เลือกออกเป็น JSON เพื่อแชร์",
+        Callback = function()
+            if not SelectedMacroName or not MacroLibrary[SelectedMacroName] then
+                warn("[Macro] No selected macro")
+                return
+            end
+
+            local exportData = {
+                Name = SelectedMacroName,
+                Data = SerializeValue(MacroLibrary[SelectedMacroName])
+            }
+
+            local json = game:GetService("HttpService"):JSONEncode(exportData)
+
+            if setclipboard then
+                setclipboard(json)
+                Fluent:Notify({
+                    Title = "Macro",
+                    Content = "Copied Macro JSON to clipboard",
+                    Duration = 3
+                })
+            else
+                print(json)
+            end
+        end
+    })
+
+    local ImportMacroJson = ""
+
+    Tabs.Marco:AddInput("ImportMacroJsonInput", {
+        Title = "Import Macro JSON",
+        Description = "วางข้อความ JSON",
+        Default = "",
+        Placeholder = "Paste Macro JSON here",
+        Numeric = false,
+        Finished = true,
+        Callback = function(Value)
+            ImportMacroJson = tostring(Value or "")
+        end
+    })
+
+    Tabs.Marco:AddButton({
+        Title = "Import Macro JSON",
+        Description = "นำเข้า JSON จากช่องด้านบน สร้างเป็นมาโครใหม่",
+        Callback = function()
+            if ImportMacroJson == "" then
+                warn("[Macro] Import JSON is empty")
+                return
+            end
+
+            local ok, decoded = pcall(function()
+                return game:GetService("HttpService"):JSONDecode(ImportMacroJson)
+            end)
+
+            if not ok or type(decoded) ~= "table" then
+                warn("[Macro] Invalid JSON")
+                return
+            end
+
+            local name = CleanMacroName(decoded.Name or "ImportedMacro")
+            if name == "" then
+                name = "ImportedMacro"
+            end
+
+            if MacroLibrary[name] then
+                name = name .. "_" .. tostring(os.time())
+            end
+
+            MacroLibrary[name] = DeserializeValue(decoded.Data)
+
+            SelectedMacroName = name
+            RefreshMacroDropdown()
+            RefreshSwitchDropdowns()
+            SaveMacros()
+
+            Fluent:Notify({
+                Title = "Macro",
+                Content = "Imported Macro: " .. name,
+                Duration = 3
+            })
+        end
+    })
+
+    Tabs.AutoPlay:AddSection("Auto Play Path Pro")
+
+    Tabs.AutoPlay:AddToggle("AutoPlayToggle", {
+        Title = "Enable Auto Play",
+        Default = false
+    }):OnChanged(function()
+        AutoPlayEnabled = Options.AutoPlayToggle.Value
+    end)
+
+    Tabs.AutoPlay:AddToggle("AutoPlaceToggle", {
+        Title = "Auto Place",
+        Default = false
+    }):OnChanged(function()
+        AutoPlaceEnabled = Options.AutoPlaceToggle.Value
+    end)
+
+    Tabs.AutoPlay:AddToggle("AutoUpgradeToggle", {
+        Title = "Auto Upgrade",
+        Default = false
+    }):OnChanged(function()
+        AutoUpgradeEnabled = Options.AutoUpgradeToggle.Value
+    end)
+
+    Tabs.AutoPlay:AddSlider("PathMaxUnits", {
+        Title = "Max Units",
+        Min = 1,
+        Max = 20,
+        Default = 12,
+        Rounding = 0
+    }):OnChanged(function(v)
+        PathConfig.MaxUnits = v
+    end)
+
+    Tabs.AutoPlay:AddSlider("PathUpgradeMoney", {
+        Title = "Upgrade Money",
+        Min = 100,
+        Max = 10000,
+        Default = 300,
+        Rounding = 0
+    }):OnChanged(function(v)
+        PathConfig.UpgradeMoney = v
+    end)
+
+    Tabs.AutoPlay:AddSlider("PathMinDistance", {
+        Title = "Min Tower Distance",
+        Min = 3,
+        Max = 15,
+        Default = 5,
+        Rounding = 0
+    }):OnChanged(function(v)
+        PathConfig.MinDistance = v
+    end)
+
+    Tabs.Card:AddToggle("AutoSelectPathCardToggle", {
+        Title = "Auto Select Card",
+        Description = "เลือก Card อัตโนมัติตาม Priority",
+        Default = false
+    }):OnChanged(function()
+        AutoSelectPathCardEnabled = Options.AutoSelectPathCardToggle.Value
+    end)
+    Tabs.Card:AddSection("VirtualRealm")
+    Tabs.Card:AddParagraph({
+        Title = "How To Use",
+        Content = "ตั้งค่า Priority 1-10 ให้ Card ที่ต้องการ เลขมากสุดจะถูกเลือกก่อน ถ้าเลขเท่ากันสคริปจะสุ่มเลือกจากตัวที่คะแนนเท่ากัน"
+    })
+
+    Tabs.Card:AddSection("Paths")
+
+    Tabs.Card:AddSlider("Priority_SharedBonds", {
+        Title = "Shared Bonds",
+        Min = 1,
+        Max = 10,
+        Default = 1,
+        Rounding = 0
+    }):OnChanged(function(v)
+        PathCardPriority["Shared Bonds"] = v
+    end)
+
+    Tabs.Card:AddSlider("Priority_FutureWealth", {
+        Title = "Future Wealth",
+        Min = 1,
+        Max = 10,
+        Default = 1,
+        Rounding = 0
+    }):OnChanged(function(v)
+        PathCardPriority["Future Wealth"] = v
+    end)
+
+    Tabs.Card:AddSlider("Priority_GracefulEnd", {
+        Title = "Graceful End",
+        Min = 1,
+        Max = 10,
+        Default = 1,
+        Rounding = 0
+    }):OnChanged(function(v)
+        PathCardPriority["Graceful End"] = v
+    end)
+
+    Tabs.Card:AddSlider("Priority_MagicsManifest", {
+        Title = "Magic's Manifest",
+        Min = 1,
+        Max = 10,
+        Default = 1,
+        Rounding = 0
+    }):OnChanged(function(v)
+        PathCardPriority["Magic's Manifest"] = v
+    end)
+
+    Tabs.Card:AddSlider("Priority_RulersDecree", {
+        Title = "Ruler's Decree",
+        Min = 1,
+        Max = 10,
+        Default = 1,
+        Rounding = 0
+    }):OnChanged(function(v)
+        PathCardPriority["Ruler's Decree"] = v
+    end)
+
+    Tabs.Card:AddSection("Blessing")
+
+    local BlessingCards = {
+        "Hyper Speed",
+        "Ramping Area",
+        "Sniper Rifle",
+        "Battery Charged",
+        "Accurate",
+        "Elementalist",
+        "Stasis",
+        "Bad Blood",
+        "Intercontinental",
+        "Share The Wealth",
+        "The Bigger They Are",
+        "Increased Funding",
+        "Fireworks",
+        "Sure Fire",
+        "Hawk-Eyed",
+        "Teamwide Carnage",
+        "Weakened",
+        "Shared Vision",
+        "Lambo",
+        "Marathon",
+        "Farmer",
+        "Teamwork",
+        "Toxic",
+        "Chippin' In",
+        "50 Cal",
+        "Rapid Response",
+        "The Harder They Fall",
+        "Investment",
+        "Global Range",
+        "Fleet Footed",
+        "Corruption",
+        "Opportunist",
+        "Telescope",
+        "Spy Glass",
+        "Uncapped Wealth",
+        "Binoculars",
+        "Solo Bomber",
+        "Widespread",
+        "Dead-Eye",
+        "Chromed",
+        "Avatar",
+        "Prosperous",
+        "Slow But Steady",
+        "Planet Buster",
+        "Max Reps",
+        "Slow Reactions",
+        "Rapid Shot",
+        "Second Account",
+    }
+
+    for _, cardName in ipairs(BlessingCards) do
+        local optionName = "Priority_" .. cardName:gsub("[^%w]", "")
+
+        Tabs.Card:AddSlider(optionName, {
+            Title = cardName,
+            Min = 1,
+            Max = 10,
+            Default = 1,
+            Rounding = 0
+        }):OnChanged(function(v)
+            PathCardPriority[cardName] = v
+        end)
+    end
+
+    task.spawn(function()
+        while task.wait(1) do
+            if Fluent.Unloaded then break end
+
+            if IsInMatch() and AutoSelectPathCardEnabled then
+                local selected = SelectBestPathCard()
+
+                if selected then
+                    task.wait(3)
+                end
+            end
+        end
+    end)
+
+    Tabs.SwitchMacro:AddSection("Switch Settings")
+
+    Tabs.SwitchMacro:AddToggle("AutoSwitchMacroToggle", {
+        Title = "Auto Switch Macro",
+        Description = "สลับมาโครโดยอัตโนมัติตามด่านที่กำลังเล่นอยู่ (ต้องตั้งค่า Macro ในแต่ละด่านก่อน)",
+        Default = false
+    }):OnChanged(function()
+        AutoSwitchMacro = Options.AutoSwitchMacroToggle.Value
+    end)
+
+    Tabs.SwitchMacro:AddButton({
+        Title = "Refresh Macro List",
+        Description = "รีเฟรชรายชื่อมาโครสำหรับหน้า SwitchMacro ให้เป็นปัจจุบัน",
+        Callback = function()
+            RefreshMacroDropdown()
+            RefreshSwitchDropdowns()
+
+            Fluent:Notify({
+                Title = "SwitchMacro",
+                Content = "Macro dropdowns refreshed",
+                Duration = 2
+            })
+        end
+    })
+
+    Tabs.SwitchMacro:AddSection("Story Mode")
+
+    AddStageMacroDropdown("Switch_NinjaForest", "Ninja Forest")
+    AddStageMacroDropdown("Switch_MarineBase", "Marine Base")
+    AddStageMacroDropdown("Switch_HollowedMoon", "Hollowed Moon")
+    AddStageMacroDropdown("Switch_TheInvasion", "The Invasion")
+    AddStageMacroDropdown("Switch_ShinobiWorldWar", "Shinobi World War")
+    AddStageMacroDropdown("Switch_BeyondFantasy", "Beyond Fantasy")
+    AddStageMacroDropdown("Switch_SorcererGames", "Sorcerer Games")
+
+    Tabs.SwitchMacro:AddSection("Raid")
+
+    AddStageMacroDropdown("Switch_TopOfHuecoCastle", "Top of Hueco Castle")
+    AddStageMacroDropdown("Switch_ShinobiBattlefield", "Shinobi Battlefield")
+    AddStageMacroDropdown("Switch_CrimsonThroneChamber", "Crimson Throne Chamber")
+
+    Tabs.SwitchMacro:AddSection("Portal")
+
+    AddStageMacroDropdown("Switch_DestroyedGamesArena", "Destroyed Games Arena")
+    AddStageMacroDropdown("Switch_KitsunoxStruggle", "Kitsunox Struggle")
+
+    Tabs.SwitchMacro:AddSection("Challenges")
+
+    AddStageMacroDropdown("Switch_Ragnarok", "Ragnarok")
+    AddStageMacroDropdown("Switch_FrozenStronghold", "Frozen Stronghold")
+
+    Tabs.SwitchMacro:AddSection("World Raid")
+
+    AddStageMacroDropdown("Switch_AntKingLair", "Ant King Lair")
+
+    Tabs.SwitchMacro:AddSection("Rifts")
+
+    AddStageMacroDropdown("Switch_TheStrongestOfToday", "The Strongest Of Today")
+    AddStageMacroDropdown("Switch_TheStrongestAllTime", "The Strongest All Time")
+
+    local AutoOpenPortalEnabled = false
+    local AutoStartPortalEnabled = false
+    local SelectedPortalMap = "Perfect Arena"
+    local SelectedPortalTier = "1"
+
+    local PortalKeyMap = {
+        ["Perfect Arena"] = "PerfectArenaKey",
+        ["Kurama Fight"] = "KuramaFightKey"
+    }
+
+    local function GetSelectedPortalKey()
+        local prefix = PortalKeyMap[SelectedPortalMap]
+        if not prefix then return nil end
+
+        return prefix .. tostring(SelectedPortalTier)
+    end
+
+    local function OpenSelectedPortal()
+        EnsurePortalRemotes()
+
+        if not UseItemRF then
+            warn("[Portal] UseItem remote not ready")
+            return false
+        end
+
+        local key = GetSelectedPortalKey()
+        if not key then
+            warn("[Portal] Invalid portal key")
+            return false
+        end
+
+        local ok, result = pcall(function()
+            return UseItemRF:InvokeServer(key)
+        end)
+
+        print("[Portal] Open:", key, "ok:", ok, "result:", tostring(result))
+
+        return ok
+    end
+
+    local function StartPortal()
+        EnsurePortalRemotes()
+
+        if not StartPortalRF then
+            warn("[Portal] StartPortal remote not ready")
+            return
+        end
+
+        pcall(function()
+            StartPortalRF:InvokeServer()
+        end)
+
+        print("[Portal] StartPortal fired")
+    end
+
+    Tabs.Portal:AddSection("Auto Open Portal")
+
+    Tabs.Portal:AddDropdown("PortalMapSelect", {
+        Title = "Select Portal Map",
+        Description = "เลือก Portal ที่ต้องการเปิด",
+        Values = {
+            "Perfect Arena",
+            "Kurama Fight"
+        },
+        Multi = false,
+        Default = 1
+    }):OnChanged(function(Value)
+        SelectedPortalMap = Value
+    end)
+
+    Tabs.Portal:AddDropdown("PortalTierSelect", {
+        Title = "Select Tier",
+        Description = "เลือก Tier 1-4",
+        Values = {
+            "1", "2", "3", "4"
+        },
+        Multi = false,
+        Default = 1
+    }):OnChanged(function(Value)
+        SelectedPortalTier = Value
+    end)
+
+    Tabs.Portal:AddButton({
+        Title = "Open Portal Once",
+        Description = "เปิด Portal 1 ครั้งตาม Map และ Tier ที่เลือก",
+        Callback = function()
+            OpenSelectedPortal()
+        end
+    })
+
+    Tabs.Portal:AddToggle("AutoOpenPortalToggle", {
+        Title = "Auto Open Portal",
+        Description = "เปิด Portal อัตโนมัติตาม Map และ Tier ที่เลือก",
+        Default = false
+    }):OnChanged(function()
+        AutoOpenPortalEnabled = Options.AutoOpenPortalToggle.Value
+    end)
+
+    Tabs.Portal:AddToggle("AutoStartPortalToggle", {
+        Title = "Auto Start Portal",
+        Description = "เริ่ม Portal อัตโนมัติหลังจากเปิด",
+        Default = false
+    }):OnChanged(function()
+        AutoStartPortalEnabled = Options.AutoStartPortalToggle.Value
+    end)
+
+    task.spawn(function()
+        while task.wait(1) do
+            if Fluent.Unloaded then break end
+
+            if IsLobby() then
+                if AutoOpenPortalEnabled then
+                    OpenSelectedPortal()
+                end
+
+                if AutoStartPortalEnabled then
+                    StartPortal()
+                end
+            end
+        end
+    end)
+
+    local SelectedRift = "GojoRift"
+    local AutoStartRiftEnabled = false
+
+    local RiftPacketMap = {
+        ["GojoRift"] = ")\b\000GojoRift\000\000\000\128?\001\0001\000\004\000Easy\000\000\005\000Rifts\000\000"
+    }
+
+    local function GetRiftWorldName()
+        local ok, result = pcall(function()
+            return workspace.Pods.Rifts.Part.SurfaceGui.Container.WorldName.Text
+        end)
+
+        return ok and tostring(result) or "Unknown"
+    end
+
+    local function GetRiftStatus()
+        local ok, result = pcall(function()
+            return workspace.Pods.Rifts.Part.SurfaceGui.Container.StatusBar.Label.Text
+        end)
+
+        return ok and tostring(result) or "Unknown"
+    end
+
+    local function CreateSelectedRiftRoom()
+        local packet = RiftPacketMap[SelectedRift]
+        if not packet then
+            warn("[Rifts] Invalid rift:", SelectedRift)
+            return
+        end
+
+        Remote:FireServer(buffer.fromstring(packet))
+        print("[Rifts] Create Room:", SelectedRift)
+    end
+
+    local function StartRiftRoom()
+        StartMission()
+        print("[Rifts] Start Room")
+    end
+
+    Tabs.Rifts:AddSection("Rifts Information")
+
+    local RiftWorldParagraph = Tabs.Rifts:AddParagraph({
+        Title = "World Name",
+        Content = GetRiftWorldName()
+    })
+
+    local RiftStatusParagraph = Tabs.Rifts:AddParagraph({
+        Title = "Rotation Status",
+        Content = GetRiftStatus()
+    })
+
+    Tabs.Rifts:AddButton({
+        Title = "Refresh Rifts Info",
+        Description = "อัปเดตชื่อ Rift และเวลาหมุนเวียน",
+        Callback = function()
+            RiftWorldParagraph:SetDesc(GetRiftWorldName())
+            RiftStatusParagraph:SetDesc(GetRiftStatus())
+        end
+    })
+
+    Tabs.Rifts:AddSection("Create Rift Room")
+
+    Tabs.Rifts:AddDropdown("RiftSelect", {
+        Title = "Select Rift",
+        Description = "เลือก Rift ที่ต้องการสร้างห้อง",
+        Values = {
+            "GojoRift"
+        },
+        Multi = false,
+        Default = 1
+    }):OnChanged(function(Value)
+        SelectedRift = Value
+    end)
+
+    Tabs.Rifts:AddButton({
+        Title = "Create Rift Room",
+        Description = "สร้างห้อง Rift ตามที่เลือก",
+        Callback = function()
+            CreateSelectedRiftRoom()
+        end
+    })
+
+    Tabs.Rifts:AddButton({
+        Title = "Start Rift",
+        Description = "กดเริ่มห้อง Rift",
+        Callback = function()
+            StartRiftRoom()
+        end
+    })
+
+    Tabs.Rifts:AddToggle("AutoStartRiftToggle", {
+        Title = "Auto Create + Start Rift",
+        Description = "สร้างห้อง Rift แล้วกด Start อัตโนมัติ",
+        Default = false
+    }):OnChanged(function()
+        AutoStartRiftEnabled = Options.AutoStartRiftToggle.Value
+    end)
+
+    task.spawn(function()
+        while task.wait(3) do
+            if Fluent.Unloaded then break end
+
+            if IsLobby() and AutoStartRiftEnabled then
+                CreateSelectedRiftRoom()
+                task.wait(2)
+                StartRiftRoom()
+            end
+        end
+    end)
+
+    local SelectedBossEventMap = "Shinobi Alliance"
+    local AutoJoinBossEventEnabled = false
+    local AutoStartBossEventEnabled = false
+    local AutoFindMatchBossEventEnabled = false
+
+    local BossEventPacketMap = {
+        ["Shinobi Alliance"] = ")\015\000ShinobiAlliance\000\000\000\128?\001\0001\000\t\000Nightmare\015\000ShinobiAlliance\016\000LimitedTimeModes\000\000",
+        ["Ragnarok"] = ")\b\000Ragnarok\000\000\000\128?\001\0001\000\t\000Nightmare\b\000Ragnarok\016\000LimitedTimeModes\000\000"
+    }
+
+    local function JoinBossEvent()
+        local packet = BossEventPacketMap[SelectedBossEventMap]
+
+        if not packet then
+            warn("[Boss Event] Invalid map:", SelectedBossEventMap)
+            return
+        end
+
+        Remote:FireServer(buffer.fromstring(packet))
+        print("[Boss Event] Join:", SelectedBossEventMap)
+    end
+
+    local function StartBossEvent()
+        Remote:FireServer(buffer.fromstring(",\000"))
+        print("[Boss Event] Start")
+    end
+
+    local function FindMatchBossEvent()
+        Remote:FireServer(buffer.fromstring(",\001"))
+        print("[Boss Event] Find Match")
+    end
+
+    Tabs.BossEvent:AddSection("Boss Event")
+
+    Tabs.BossEvent:AddDropdown("BossEventMapSelect", {
+        Title = "Select Map",
+        Description = "เลือก Boss Event Map",
+        Values = {
+            "Shinobi Alliance",
+            "Ragnarok"
+        },
+        Multi = false,
+        Default = 1
+    }):OnChanged(function(Value)
+        SelectedBossEventMap = Value
+    end)
+
+    Tabs.BossEvent:AddButton({
+        Title = "Join Boss Event Once",
+        Description = "สร้าง/เข้าห้อง Boss Event 1 ครั้ง",
+        Callback = function()
+            JoinBossEvent()
+        end
+    })
+
+    Tabs.BossEvent:AddButton({
+        Title = "Start Boss Event Once",
+        Description = "กด Start 1 ครั้ง",
+        Callback = function()
+            StartBossEvent()
+        end
+    })
+
+    Tabs.BossEvent:AddButton({
+        Title = "Find Match Once",
+        Description = "กด Find Match 1 ครั้ง",
+        Callback = function()
+            FindMatchBossEvent()
+        end
+    })
+
+    Tabs.BossEvent:AddToggle("AutoJoinBossEventToggle", {
+        Title = "Auto Join Boss Event",
+        Description = "เข้าห้อง Boss Event อัตโนมัติ",
+        Default = false
+    }):OnChanged(function()
+        AutoJoinBossEventEnabled = Options.AutoJoinBossEventToggle.Value
+    end)
+
+    Tabs.BossEvent:AddToggle("AutoStartBossEventToggle", {
+        Title = "Auto Start",
+        Description = "กด Start อัตโนมัติ แยกจาก Auto Join",
+        Default = false
+    }):OnChanged(function()
+        AutoStartBossEventEnabled = Options.AutoStartBossEventToggle.Value
+    end)
+
+    Tabs.BossEvent:AddToggle("AutoFindMatchBossEventToggle", {
+        Title = "Auto Find Match",
+        Description = "ยิง Remote Find Match อัตโนมัติ",
+        Default = false
+    }):OnChanged(function()
+        AutoFindMatchBossEventEnabled = Options.AutoFindMatchBossEventToggle.Value
+    end)
+
+    task.spawn(function()
+        while task.wait(3) do
+            if Fluent.Unloaded then break end
+
+            if IsLobby() then
+                if AutoJoinBossEventEnabled then
+                    JoinBossEvent()
+                end
+
+                if AutoStartBossEventEnabled then
+                    StartBossEvent()
+                end
+
+                if AutoFindMatchBossEventEnabled then
+                    FindMatchBossEvent()
+                end
+            end
+        end
+    end)
+
+    LoadMacros()
+    RefreshMacroDropdown()
+    RefreshSwitchDropdowns()
+
+    local MapDisplayNames = {
+        "Final Valley",
+        "Marine Base",
+        "Hueco Mundo",
+        "Cell Arena",
+        "Shinobi World War",
+        "Beyond Fantasy",
+        "Shibuya"
+    }
+
+    local MapRemoteNames = {
+        ["Final Valley"] = "Final Valley",
+        ["Marine Base"] = "Marine Base",
+        ["Hueco Mundo"] = "Hueco Mundo",
+        ["Cell Arena"] = "CellArena",
+        ["Shinobi World War"] = "ShinobiWorldWar",
+        ["Beyond Fantasy"] = "BeyoundFantasy",
+        ["Shibuya"] = "Shibuya",
+    }
+
+    local Acts_Story = {"1", "2", "3", "4", "5", "6"}
+    local Acts_Legend = {"1", "2", "3"}
+
+    local Difficulties = {
+        "Easy", "Hard", "Nightmare"
+    }
+
+    local DifficultyMeters = {
+        "75", "100", "150", "200", "250", "300", "350", "400", "450", "500",
+        "550", "600", "650", "700", "750", "800", "850", "900", "950", "1000"
+    }
+
+    local AutoJoinEnabled = false
+    local SelectedMap = "Final Valley"
+    local SelectedAct = "1"
+    local SelectedDifficulty = "Easy"
+    local SelectedMeter = "75"
+    local SelectedMode = "Story"
+
+    local function FloatBytes(value)
+        local b = buffer.create(4)
+        buffer.writef32(b, 0, value)
+        return buffer.tostring(b)
+    end
+
+    local function JoinMission(mapName, act, percent, difficulty, mode)
+        local packet =
+            ")\f\000" ..
+            mapName .. "\000" ..
+            FloatBytes(tonumber(percent) / 100) ..
+            "\001\000" ..
+            tostring(act) .. "\000" ..
+            string.char(#difficulty) .. "\000" ..
+            difficulty .. "\000" ..
+            "\000" ..
+            string.char(#mode) .. "\000" ..
+            mode .. "\000\000"
+
+        Remote:FireServer(buffer.fromstring(packet))
+    end
+
+    local function StartMission()
+        Remote:FireServer(buffer.fromstring(",\000"))
+    end
+
+    local function StartWorldRaid()
+        Remote:FireServer(buffer.fromstring(",\001"))
+    end
+
+    local function JoinWorldRaid()
+        Remote:FireServer(buffer.fromstring(")\a\000AntKing\000\000\000\128\063\001\0001\000\t\000Nightmare\000\000\t\000WorldRaid\000\000"))
+    end
+
+    local function JoinWorldRaidAndStart()
+        JoinWorldRaid()
+        task.wait(2)
+        StartWorldRaid()
+    end
+
+    local ChallengeMaps = {
+        "Ragnarok",
+        "Frozen Stronghold"
+    }
+
+    local ChallengeRemoteMap = {
+        ["Ragnarok"] = "Olympus Judgement",
+        ["Frozen Stronghold"] = "Frozen Stronghold"
+    }
+
+    local ChallengeIdMap = {
+        ["Ragnarok"] = "\001",
+        ["Frozen Stronghold"] = "\002"
+    }
+
+    local SelectedChallengeMap = "Ragnarok"
+
+    local function JoinChallenge(displayName)
+        local realMap = ChallengeRemoteMap[displayName]
+        local challengeId = ChallengeIdMap[displayName]
+
+        local packet =
+            ")\017\000" ..
+            realMap ..
+            "\001" ..
+            challengeId ..
+            "\a\000Special\000" ..
+            "\000\128\063" ..
+            "\001\0001\000\004\000Easy\000\000\t\000Challenge\000\000"
+
+        Remote:FireServer(buffer.fromstring(packet))
+    end
+
+    local function JoinChallengeAndStart()
+        JoinChallenge(SelectedChallengeMap)
+        task.wait(2)
+        StartMission()
+    end
+
+    local RaidMaps = {
+        "Top of Hueco Castle",
+        "Shinobi Battlefield",
+        "Crimson Throne Chamber"
+    }
+
+    local RaidActs = {
+        "1", "2", "3", "4", "5", "Boss Rush"
+    }
+
+    local SelectedRaidMap = "Top of Hueco Castle"
+    local SelectedRaidAct = "1"
+
+    local function JoinRaid(mapName, act)
+        local actPart
+
+        if act == "Boss Rush" then
+            actPart = "\t\000Boss Rush\000"
+        else
+            actPart = "\001\000" .. tostring(act) .. "\000"
+        end
+
+        local packet =
+            ")" ..
+            string.char(#mapName) .. "\000" ..
+            mapName ..
+            "\000\000\000\128\063" ..
+            actPart ..
+            "\004\000Easy\000\000\004\000Raid\001\000"
+
+        Remote:FireServer(buffer.fromstring(packet))
+    end
+
+    local function JoinRaidAndStart()
+        JoinRaid(SelectedRaidMap, SelectedRaidAct)
+        task.wait(2)
+        StartMission()
+    end
+
+    Tabs.Main:AddSection("[🗼] - Story & Extra Mode")
+
+    local ModeDropdown = Tabs.Main:AddDropdown("MissionMode", {
+        Title = "Select Mode",
+        Description = "เลือกโหมดที่จะเข้า เช่น Story , LegendStage , VirtualRealm",
+        Values = {"Story", "LegendStage" , "VirtualRealm"},
+        Multi = false,
+        Default = 1,
+    })
+
+    local ActDropdown = Tabs.Main:AddDropdown("MissionAct", {
+        Title = "Select Act",
+        Description = "เลือกด่าน Act ที่ต้องการเข้า โดยจำนวน Act จะเปลี่ยนตามโหมด",
+        Values = Acts_Story,
+        Multi = false,
+        Default = 1,
+    })
+
+    ModeDropdown:OnChanged(function(Value)
+        SelectedMode = Value
+
+        if Value == "LegendStage" or Value == "VirtualRealm" then
+            ActDropdown:SetValues(Acts_Legend)
+            SelectedAct = "1"
+        else
+            ActDropdown:SetValues(Acts_Story)
+            SelectedAct = "1"
+        end
+    end)
+
+    ActDropdown:OnChanged(function(Value)
+        SelectedAct = Value
+    end)
+
+    local MapDropdown = Tabs.Main:AddDropdown("MissionMap", {
+        Title = "Select Map",
+        Description = "เลือกแมพสำหรับ Story หรือโหมดเสริมที่ต้องการเข้า",
+        Values = MapDisplayNames,
+        Multi = false,
+        Default = 1,
+    })
+
+    MapDropdown:OnChanged(function(Value)
+        SelectedMap = MapRemoteNames[Value] or Value
+    end)
+
+    Tabs.Main:AddDropdown("MissionDifficulty", {
+        Title = "Select Difficulty",
+        Description = "เลือกระดับความยากของ Mission",
+        Values = Difficulties,
+        Multi = false,
+        Default = 1,
+    }):OnChanged(function(Value)
+        SelectedDifficulty = Value
+    end)
+
+    Tabs.Main:AddDropdown("MissionMeter", {
+        Title = "Select Difficulty Meter",
+        Description = "เลือกค่าเปอร์เซ็นต์ความยากของ Mission",
+        Values = DifficultyMeters,
+        Multi = false,
+        Default = 1,
+    }):OnChanged(function(Value)
+        SelectedMeter = Value
+    end)
+
+    local Toggle = Tabs.Main:AddToggle("AutoJoinMission", {
+        Title = "Auto Join Mission",
+        Description = "เปิดเพื่อเข้า Mission และกดเริ่มอัตโนมัติ",
+        Default = false
+    })
+
+    Toggle:OnChanged(function()
+        AutoJoinEnabled = Options.AutoJoinMission.Value
+    end)
+
+    task.spawn(function()
+        while task.wait(3) do
+            if Fluent.Unloaded then break end
+            if IsLobby() and AutoJoinEnabled then
+                JoinMission(SelectedMap, SelectedAct, SelectedMeter, SelectedDifficulty, SelectedMode)
+                task.wait(2)
+                StartMission()
+            end
+        end
+    end)
+
+    Tabs.Main:AddSection("[🎯] - Challenges Mode")
+
+    Tabs.Main:AddDropdown("ChallengeMap", {
+        Title = "Select Map",
+        Description = "เลือกแมพ Challenge ที่ต้องการเข้า",
+        Values = ChallengeMaps,
+        Multi = false,
+        Default = 1,
+    }):OnChanged(function(Value)
+        SelectedChallengeMap = Value
+    end)
+
+    local ChallengeToggle = Tabs.Main:AddToggle("AutoJoinChallenge", {
+        Title = "Auto Join Challenge",
+        Description = "เปิดเพื่อเข้า Challenge และกดเริ่มอัตโนมัติ",
+        Default = false
+    })
+
+    local AutoJoinChallengeEnabled = false
+
+    ChallengeToggle:OnChanged(function()
+        AutoJoinChallengeEnabled = Options.AutoJoinChallenge.Value
+    end)
+
+    task.spawn(function()
+        while task.wait(3) do
+            if Fluent.Unloaded then break end
+
+            if IsLobby() and AutoJoinChallengeEnabled then
+                JoinChallengeAndStart()
+            end
+        end
+    end)
+
+    Tabs.Main:AddSection("[🎈] - Raid Mode")
+
+    Tabs.Main:AddDropdown("RaidMap", {
+        Title = "Select Map",
+        Description = "เลือกแมพ Raid ที่ต้องการเข้า",
+        Values = RaidMaps,
+        Multi = false,
+        Default = 1,
+    }):OnChanged(function(Value)
+        SelectedRaidMap = Value
+    end)
+
+    Tabs.Main:AddDropdown("RaidAct", {
+        Title = "Select Act",
+        Description = "เลือก Act ของ Raid หรือ Boss Rush",
+        Values = RaidActs,
+        Multi = false,
+        Default = 1,
+    }):OnChanged(function(Value)
+        SelectedRaidAct = Value
+    end)
+
+    local AutoJoinRaidEnabled = false
+
+    local RaidToggle = Tabs.Main:AddToggle("AutoJoinRaid", {
+        Title = "Auto Join Raid",
+        Description = "เปิดเพื่อเข้า Raid และกดเริ่มอัตโนมัติ",
+        Default = false
+    })
+
+    RaidToggle:OnChanged(function()
+        AutoJoinRaidEnabled = Options.AutoJoinRaid.Value
+    end)
+
+    task.spawn(function()
+        while task.wait(3) do
+            if Fluent.Unloaded then break end
+
+            if IsLobby() and AutoJoinRaidEnabled then
+                JoinRaidAndStart()
+            end
+        end
+    end)
+
+    Tabs.Main:AddSection("[☠️] - World Raids")
+
+    local AutoWorldRaidEnabled = false
+
+    local WorldRaidToggle = Tabs.Main:AddToggle("AutoJoinWorldRaid", {
+        Title = "Auto Join World Raid",
+        Description = "เปิดเพื่อเข้า World Raid และหาห้องให้อัตโนมัติ",
+        Default = false
+    })
+
+    WorldRaidToggle:OnChanged(function()
+        AutoWorldRaidEnabled = Options.AutoJoinWorldRaid.Value
+    end)
+
+    task.spawn(function()
+        while task.wait(3) do
+            if Fluent.Unloaded then break end
+
+            if IsLobby() and AutoWorldRaidEnabled then
+                JoinWorldRaidAndStart()
+            end
+        end
+    end)
+
+end
+
+
+-- Addons:
+-- SaveManager (Allows you to have a configuration system)
+-- InterfaceManager (Allows you to have a interface managment system)
+
+-- Hand the library over to our managers
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+
+-- Ignore keys that are used by ThemeManager.
+-- (we dont want configs to save themes, do we?)
+SaveManager:IgnoreThemeSettings()
+
+-- You can add indexes of elements the save manager should ignore
+SaveManager:SetIgnoreIndexes({})
+
+-- use case for doing it this way:
+-- a script hub could have themes in a global folder
+-- and game configs in a separate folder per game
+InterfaceManager:SetFolder("SwitchScriptHub")
+SaveManager:SetFolder("SwitchScriptHub/specific-game")
+
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+
+
+Window:SelectTab(1)
+
+Fluent:Notify({
+    Title = "Switch Hub",
+    Content = "The script has been loaded.",
+    Duration = 8
+})
+
+-- You can use the SaveManager:LoadAutoloadConfig() to load a config
+-- which has been marked to be one that auto loads!
+SaveManager:LoadAutoloadConfig()
