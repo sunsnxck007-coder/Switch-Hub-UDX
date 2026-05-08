@@ -208,12 +208,6 @@ do
 
     warn("[Remote] Skip tower remotes at startup, lazy load later")
 
-    --// ==============================
-    --// Macro Record + Auto Play System
-    --// Insert after:
-    --// local UseAbilityRE = TowerRE:WaitForChild("UseAbility")
-    --// ==============================
-
     local RecordingMacro = false
     local PlayingMacro = false
     local MacroSessionId = 0
@@ -285,10 +279,6 @@ do
 
         print("[Macro] Saved macros")
     end
-
-    --// ==============================
-    --// CARD PATH SELECTOR
-    --// ==============================
 
     local AutoSelectPathCardEnabled = false
 
@@ -371,7 +361,7 @@ do
         local VirtualInputManager = game:GetService("VirtualInputManager")
         local center = gui.AbsolutePosition + (gui.AbsoluteSize / 2)
         local x = center.X
-        local y = center.Y + 36 -- ชดเชย Topbar
+        local y = center.Y + 36 
 
         print("[CARD] VIM Click:", gui:GetFullName(), "X:", x, "Y:", y)
 
@@ -1255,10 +1245,9 @@ do
         end
     end)
 
-    --// ==============================
-    --// AUTO PLAY PATH PRO - STABLE PATH VERSION
-    --// ใช้ workspace.Map.Path โดยตรง
-    --// ==============================
+
+
+
 
     local AutoPlayEnabled = false
     local AutoPlaceEnabled = false
@@ -1630,7 +1619,7 @@ do
             return false
         end
 
-        -- วางให้ครบทุก Slot ก่อน
+
         for _, unit in ipairs(deck) do
             if not PlacedSlotMap[unit.Slot] then
                 print("[AUTO PLAY] Need place:", unit.Name, "Slot:", unit.Slot, "Price:", unit.Price)
@@ -1733,10 +1722,9 @@ do
         end
     end)
 
-    --// ==============================
-    --// Macro UI
-    --// ใช้ Tabs.Marco เดิมของคุณ
-    --// ==============================
+
+
+
 
     Tabs.Marco:AddSection("Macro Creation")
 
